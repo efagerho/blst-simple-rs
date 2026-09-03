@@ -1,0 +1,17 @@
+[package]
+name = "blst-simple-rs"
+version = "0.1.0"
+edition = "2024"
+rust-version = "1.85"
+license = "Apache-2.0"
+description = "Simplified BLS signatures over blst"
+repository = "https://github.com/efagerho/blst-simple-rs"
+
+[features]
+default = ["std", "signing"]
+std = []
+signing = []
+portable = []
+force-adx = []
+
+[dependencies]
