@@ -1,6 +1,7 @@
 use core::fmt;
 
-use crate::{HashedMessage, MissingBlstType, ProofOfPossession, PublicKey, Signature};
+use crate::ffi::{self, Scalar};
+use crate::{HashedMessage, ProofOfPossession, PublicKey, Signature};
 
 pub(crate) const MINIMUM_KEY_MATERIAL_LENGTH: usize = 32;
 
@@ -12,8 +13,7 @@ pub(crate) const MINIMUM_KEY_MATERIAL_LENGTH: usize = 32;
 /// import a scalar.
 #[derive(Clone)]
 pub struct SecretKey {
-    // Missing BLST type: `blst_scalar`.
-    _missing_blst_scalar: MissingBlstType,
+    scalar: Scalar,
 }
 
 impl SecretKey {
@@ -40,17 +40,21 @@ impl SecretKey {
     }
 
     /// Imports a canonical, nonzero big-endian scalar.
-    pub fn from_bytes(_bytes: &[u8; 32]) -> Result<Self, SecretKeyError> {
-        unimplemented!("secret-key decoding requires BLST")
+    pub fn from_bytes(bytes: &[u8; 32]) -> Result<Self, SecretKeyError> {
+        ffi::decode_scalar(bytes)
+            .map(|scalar| Self { scalar })
+            .ok_or(SecretKeyError::InvalidEncoding)
     }
 
     /// Exports this scalar as 32 big-endian bytes.
+    ///
+    /// The caller is responsible for erasing the returned bytes.
     // TODO: probably hide this behind a dedicated feature enabled only by
     // special tooling, for instance offline key generation for later import,
     // so ordinary builds cannot export secret scalars at all.
     #[must_use]
     pub fn to_bytes(&self) -> [u8; 32] {
-        unimplemented!("secret-key encoding requires BLST")
+        ffi::encode_scalar(&self.scalar)
     }
 
     /// Derives the corresponding proof-capable public key.
@@ -77,16 +81,16 @@ impl SecretKey {
         unimplemented!("proof-of-possession generation requires BLST")
     }
 
-    pub(crate) fn derive_key_material(
-        _key_material: &[u8],
-        _salt: &[u8],
-        _key_info: &[u8],
-    ) -> Self {
-        unimplemented!("BLS KeyGen requires BLST")
+    pub(crate) fn derive_key_material(key_material: &[u8], salt: &[u8], key_info: &[u8]) -> Self {
+        Self {
+            scalar: ffi::derive_key_material(key_material, salt, key_info),
+        }
     }
 
-    pub(crate) fn derive_hierarchical_child(&self, _index: u32) -> Self {
-        unimplemented!("EIP-2333 child-key derivation requires BLST")
+    pub(crate) fn derive_hierarchical_child(&self, index: u32) -> Self {
+        Self {
+            scalar: ffi::derive_hierarchical_child(&self.scalar, index),
+        }
     }
 }
 
@@ -98,8 +102,7 @@ impl fmt::Debug for SecretKey {
 
 impl Drop for SecretKey {
     fn drop(&mut self) {
-        // `MissingBlstType` has no secret bytes. A BLST-backed implementation
-        // must erase its scalar here.
+        ffi::zeroize_scalar(&mut self.scalar);
     }
 }
 
@@ -153,5 +156,124 @@ pub(crate) fn validate_key_material_length(bytes: &[u8]) -> Result<(), KeyMateri
         })
     } else {
         Ok(())
+    }
+}
+
+#[cfg(test)]
+mod tests {
+    extern crate std;
+
+    use core::mem::size_of;
+
+    use std::format;
+
+    use super::{KeyMaterialTooShortError, SecretKey, SecretKeyError};
+    use crate::{hierarchical, keygen};
+
+    fn hex<const N: usize>(input: &str) -> [u8; N] {
+        fn nibble(byte: u8) -> u8 {
+            match byte {
+                b'0'..=b'9' => byte - b'0',
+                b'a'..=b'f' => byte - b'a' + 10,
+                b'A'..=b'F' => byte - b'A' + 10,
+                _ => panic!("invalid hexadecimal digit"),
+            }
+        }
+
+        assert_eq!(input.len(), N * 2);
+        let mut output = [0; N];
+        for (byte, digits) in output.iter_mut().zip(input.as_bytes().chunks_exact(2)) {
+            *byte = (nibble(digits[0]) << 4) | nibble(digits[1]);
+        }
+        output
+    }
+
+    #[test]
+    fn rejects_short_key_material() {
+        let key_material = [7; 31];
+        let expected = KeyMaterialTooShortError {
+            supplied: 31,
+            minimum: 32,
+        };
+
+        assert_eq!(
+            SecretKey::from_key_material(&key_material).unwrap_err(),
+            expected
+        );
+        assert_eq!(
+            keygen::derive(&key_material, keygen::Parameters::new(b"salt")).unwrap_err(),
+            expected
+        );
+        assert_eq!(hierarchical::master(&key_material).unwrap_err(), expected);
+    }
+
+    #[test]
+    fn validates_canonical_scalar_encodings() {
+        let zero = [0; 32];
+        let order = hex("73eda753299d7d483339d80809a1d80553bda402fffe5bfeffffffff00000001");
+        let largest_valid = hex("73eda753299d7d483339d80809a1d80553bda402fffe5bfeffffffff00000000");
+
+        assert!(matches!(
+            SecretKey::from_bytes(&zero),
+            Err(SecretKeyError::InvalidEncoding)
+        ));
+        assert!(matches!(
+            SecretKey::from_bytes(&order),
+            Err(SecretKeyError::InvalidEncoding)
+        ));
+
+        let secret_key = SecretKey::from_bytes(&largest_valid).unwrap();
+        assert_eq!(secret_key.to_bytes(), largest_valid);
+    }
+
+    #[test]
+    fn matches_hierarchical_derivation_vector() {
+        let seed: [u8; 64] = hex(
+            "c55257c360c07c72029aebc1b53c05ed0362ada38ead3e3e9efa3708e5349553\
+             1f09a6987599d18264c1e1c92f2cf141630c7a3c4ab7c81b2f001698e7463b04",
+        );
+        let expected_master =
+            hex("0d7359d57963ab8fbbde1852dcf553fedbc31f464d80ee7d40ae683122b45070");
+        let expected_child =
+            hex("2d18bd6c14e6d15bf8b5085c9b74f3daae3b03cc2014770a599d8c1539e50f8e");
+
+        let master = hierarchical::master(&seed).unwrap();
+        assert_eq!(master.to_bytes(), expected_master);
+        assert_eq!(
+            SecretKey::from_key_material(&seed).unwrap().to_bytes(),
+            expected_master
+        );
+        assert_eq!(hierarchical::child(&master, 0).to_bytes(), expected_child);
+    }
+
+    #[test]
+    fn configurable_key_generation_forwards_all_parameters() {
+        let key_material = [42; 32];
+        let empty = keygen::derive(&key_material, keygen::Parameters::new(b"")).unwrap();
+        let salted = keygen::derive(&key_material, keygen::Parameters::new(b"salt")).unwrap();
+        let informed = keygen::derive(
+            &key_material,
+            keygen::Parameters::new(b"").with_info(b"context"),
+        )
+        .unwrap();
+
+        let upstream = blst::min_pk::SecretKey::key_gen_v5(&key_material, b"", b"context").unwrap();
+        assert_eq!(informed.to_bytes(), upstream.to_bytes());
+
+        assert_ne!(empty.to_bytes(), salted.to_bytes());
+        assert_ne!(empty.to_bytes(), informed.to_bytes());
+
+        let simple = SecretKey::from_key_material(&key_material).unwrap();
+        let compatible =
+            keygen::derive(&key_material, keygen::Parameters::compatibility()).unwrap();
+        assert_eq!(simple.to_bytes(), compatible.to_bytes());
+    }
+
+    #[test]
+    fn debug_is_redacted_and_representation_is_compact() {
+        let secret_key = SecretKey::from_key_material(&[7; 32]).unwrap();
+
+        assert_eq!(format!("{secret_key:?}"), "SecretKey(REDACTED)");
+        assert_eq!(size_of::<SecretKey>(), 32);
     }
 }
