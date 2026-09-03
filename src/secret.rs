@@ -65,20 +65,26 @@ impl SecretKey {
 
     /// Hashes and signs arbitrary message bytes.
     #[must_use]
-    pub fn sign_message(&self, _message: &[u8]) -> Signature {
-        unimplemented!("message signing requires BLST")
+    pub fn sign_message(&self, message: &[u8]) -> Signature {
+        Signature {
+            point: ffi::sign_message(&self.scalar, message),
+        }
     }
 
     /// Signs an already hashed message.
     #[must_use]
-    pub fn sign(&self, _message: &HashedMessage) -> Signature {
-        unimplemented!("hashed-message signing requires BLST")
+    pub fn sign(&self, message: &HashedMessage) -> Signature {
+        Signature {
+            point: ffi::sign_hashed_message(&self.scalar, &message.point),
+        }
     }
 
     /// Produces a proof of possession for the corresponding public key.
     #[must_use]
     pub fn prove_possession(&self) -> ProofOfPossession {
-        unimplemented!("proof-of-possession generation requires BLST")
+        ProofOfPossession {
+            point: ffi::prove_possession(&self.scalar),
+        }
     }
 
     pub(crate) fn derive_key_material(key_material: &[u8], salt: &[u8], key_info: &[u8]) -> Self {
@@ -168,7 +174,8 @@ mod tests {
     use std::format;
 
     use super::{KeyMaterialTooShortError, SecretKey, SecretKeyError};
-    use crate::{hierarchical, keygen};
+    use crate::suite::{PROOF_OF_POSSESSION_DST, SIGNATURE_DST};
+    use crate::{HashedMessage, hierarchical, keygen};
 
     fn hex<const N: usize>(input: &str) -> [u8; N] {
         fn nibble(byte: u8) -> u8 {
@@ -278,6 +285,40 @@ mod tests {
         assert_eq!(
             secret_key.public_key().to_bytes(),
             upstream.sk_to_pk().to_bytes()
+        );
+    }
+
+    #[test]
+    fn signs_raw_and_hashed_messages() {
+        let scalar = hex("000000000000000000000000000000000000000000000000000000000000002a");
+        let secret_key = SecretKey::from_bytes(&scalar).unwrap();
+        let upstream = blst::min_pk::SecretKey::from_bytes(&scalar).unwrap();
+
+        for message in [&b""[..], &b"a\0\xffb"[..]] {
+            let expected = upstream.sign(message, SIGNATURE_DST, b"").to_bytes();
+            let hashed = HashedMessage::new(message);
+
+            assert_eq!(secret_key.sign_message(message).to_bytes(), expected);
+            assert_eq!(secret_key.sign(&hashed).to_bytes(), expected);
+        }
+    }
+
+    #[test]
+    fn proves_possession_of_the_public_key() {
+        let scalar = hex("000000000000000000000000000000000000000000000000000000000000002a");
+        let secret_key = SecretKey::from_bytes(&scalar).unwrap();
+        let upstream = blst::min_pk::SecretKey::from_bytes(&scalar).unwrap();
+        let public_key = secret_key.public_key();
+        let public_key_bytes = public_key.to_bytes();
+        let proof = secret_key.prove_possession();
+        let expected = upstream
+            .sign(&public_key_bytes, PROOF_OF_POSSESSION_DST, b"")
+            .to_bytes();
+
+        assert_eq!(proof.to_bytes(), expected);
+        assert_eq!(
+            public_key.as_unverified().verify_proof(&proof).unwrap(),
+            public_key
         );
     }
 

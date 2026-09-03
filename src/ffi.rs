@@ -18,12 +18,21 @@ pub(crate) fn hash_message(message: &[u8]) -> G2Affine {
 }
 
 fn hash_to_g2(message: &[u8], dst: &[u8]) -> G2Affine {
-    let mut projective = MaybeUninit::<blst::blst_p2>::uninit();
+    let projective = hash_to_g2_projective(message, dst);
     let mut affine = MaybeUninit::<G2Affine>::uninit();
 
     unsafe {
-        // BLST initializes both outputs and accepts a null augmentation when
-        // its length is zero.
+        blst::blst_p2_to_affine(affine.as_mut_ptr(), &projective);
+        affine.assume_init()
+    }
+}
+
+fn hash_to_g2_projective(message: &[u8], dst: &[u8]) -> blst::blst_p2 {
+    let mut projective = MaybeUninit::<blst::blst_p2>::uninit();
+
+    unsafe {
+        // BLST initializes the output and accepts a null augmentation when its
+        // length is zero.
         blst::blst_hash_to_g2(
             projective.as_mut_ptr(),
             message.as_ptr(),
@@ -33,8 +42,7 @@ fn hash_to_g2(message: &[u8], dst: &[u8]) -> G2Affine {
             ptr::null(),
             0,
         );
-        blst::blst_p2_to_affine(affine.as_mut_ptr(), projective.as_ptr());
-        affine.assume_init()
+        projective.assume_init()
     }
 }
 
@@ -142,6 +150,40 @@ pub(crate) fn derive_public_key(scalar: &Scalar) -> G1Affine {
         blst::blst_sk_to_pk_in_g1(projective.as_mut_ptr(), scalar);
         blst::blst_p1_to_affine(affine.as_mut_ptr(), projective.as_ptr());
         affine.assume_init()
+    }
+}
+
+#[cfg(feature = "signing")]
+pub(crate) fn sign_message(scalar: &Scalar, message: &[u8]) -> G2Affine {
+    let message = hash_to_g2_projective(message, SIGNATURE_DST);
+    sign_projective(scalar, &message)
+}
+
+#[cfg(feature = "signing")]
+pub(crate) fn sign_hashed_message(scalar: &Scalar, message: &G2Affine) -> G2Affine {
+    let mut projective = MaybeUninit::<blst::blst_p2>::uninit();
+
+    unsafe {
+        blst::blst_p2_from_affine(projective.as_mut_ptr(), message);
+        sign_projective(scalar, &projective.assume_init())
+    }
+}
+
+#[cfg(feature = "signing")]
+pub(crate) fn prove_possession(scalar: &Scalar) -> G2Affine {
+    let public_key = derive_public_key(scalar);
+    let public_key = compress_g1(&public_key);
+    let message = hash_to_g2_projective(&public_key, PROOF_OF_POSSESSION_DST);
+    sign_projective(scalar, &message)
+}
+
+#[cfg(feature = "signing")]
+fn sign_projective(scalar: &Scalar, message: &blst::blst_p2) -> G2Affine {
+    let mut signature = MaybeUninit::<G2Affine>::uninit();
+
+    unsafe {
+        blst::blst_sign_pk2_in_g1(ptr::null_mut(), signature.as_mut_ptr(), message, scalar);
+        signature.assume_init()
     }
 }
 
