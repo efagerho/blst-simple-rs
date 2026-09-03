@@ -11,7 +11,9 @@ pub(crate) type G1Affine = blst::blst_p1_affine;
 pub(crate) type G1Projective = blst::blst_p1;
 pub(crate) type G2Affine = blst::blst_p2_affine;
 pub(crate) type G2Projective = blst::blst_p2;
+pub(crate) type MillerLoopResult = blst::blst_fp12;
 pub(crate) type PreparedLines = [blst::blst_fp6; 68];
+pub(crate) const MILLER_LOOP_BATCH_SIZE: usize = 16;
 #[cfg(feature = "signing")]
 pub(crate) type Scalar = blst::blst_scalar;
 
@@ -187,6 +189,95 @@ pub(crate) fn g2_to_affine(point: &G2Projective) -> G2Affine {
         blst::blst_p2_to_affine(affine.as_mut_ptr(), point);
         affine.assume_init()
     }
+}
+
+fn g2_is_identity(point: &G2Affine) -> bool {
+    unsafe { blst::blst_p2_affine_is_inf(point) }
+}
+
+pub(crate) fn verify_signature(key: &G1Affine, message: &G2Affine, signature: &G2Affine) -> bool {
+    let product = miller_loop(key, message);
+    verify_miller_loop_product(&product, signature)
+}
+
+pub(crate) fn verify_prepared_signature(
+    key: &G1Affine,
+    message: &PreparedLines,
+    signature: &G2Affine,
+) -> bool {
+    let product = miller_loop_prepared(key, message);
+    verify_miller_loop_product(&product, signature)
+}
+
+pub(crate) fn miller_loop(key: &G1Affine, message: &G2Affine) -> MillerLoopResult {
+    let mut result = MaybeUninit::<MillerLoopResult>::uninit();
+
+    unsafe {
+        blst::blst_miller_loop(result.as_mut_ptr(), message, key);
+        result.assume_init()
+    }
+}
+
+pub(crate) fn miller_loop_many(keys: &[G1Affine], messages: &[G2Affine]) -> MillerLoopResult {
+    assert_eq!(keys.len(), messages.len());
+    assert!(!keys.is_empty());
+    assert!(keys.len() <= MILLER_LOOP_BATCH_SIZE);
+
+    let mut key_pointers = [ptr::null::<G1Affine>(); MILLER_LOOP_BATCH_SIZE];
+    let mut message_pointers = [ptr::null::<G2Affine>(); MILLER_LOOP_BATCH_SIZE];
+    for (index, (key, message)) in keys.iter().zip(messages).enumerate() {
+        key_pointers[index] = key;
+        message_pointers[index] = message;
+    }
+
+    let mut result = MaybeUninit::<MillerLoopResult>::uninit();
+    unsafe {
+        blst::blst_miller_loop_n(
+            result.as_mut_ptr(),
+            message_pointers.as_ptr(),
+            key_pointers.as_ptr(),
+            keys.len(),
+        );
+        result.assume_init()
+    }
+}
+
+pub(crate) fn miller_loop_prepared(key: &G1Affine, lines: &PreparedLines) -> MillerLoopResult {
+    let mut result = MaybeUninit::<MillerLoopResult>::uninit();
+
+    unsafe {
+        blst::blst_miller_loop_lines(result.as_mut_ptr(), lines.as_ptr(), key);
+        result.assume_init()
+    }
+}
+
+pub(crate) fn miller_loop_identity() -> MillerLoopResult {
+    unsafe { *blst::blst_fp12_one() }
+}
+
+pub(crate) fn multiply_miller_loop(accumulator: &mut MillerLoopResult, term: &MillerLoopResult) {
+    unsafe {
+        let accumulator = accumulator as *mut MillerLoopResult;
+        blst::blst_fp12_mul(accumulator, accumulator, term);
+    }
+}
+
+pub(crate) fn verify_miller_loop_product(product: &MillerLoopResult, signature: &G2Affine) -> bool {
+    let signature = if g2_is_identity(signature) {
+        miller_loop_identity()
+    } else {
+        unsafe {
+            let mut result = MaybeUninit::<MillerLoopResult>::uninit();
+            blst::blst_miller_loop(
+                result.as_mut_ptr(),
+                signature,
+                blst::blst_p1_affine_generator(),
+            );
+            result.assume_init()
+        }
+    };
+
+    unsafe { blst::blst_fp12_finalverify(product, &signature) }
 }
 
 pub(crate) fn verify_proof(public_key: &G1Affine, proof: &G2Affine) -> bool {
