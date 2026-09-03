@@ -4,6 +4,7 @@ use core::ptr;
 #[cfg(feature = "signing")]
 use core::sync::atomic::{Ordering, compiler_fence};
 
+use crate::DecodeError;
 use crate::suite::SIGNATURE_DST;
 
 pub(crate) type G2Affine = blst::blst_p2_affine;
@@ -42,7 +43,6 @@ pub(crate) fn precompute_lines(message: &G2Affine) -> Box<PreparedLines> {
     }
 }
 
-#[cfg(test)]
 pub(crate) fn compress_g2(point: &G2Affine) -> [u8; 96] {
     let mut bytes = [0; 96];
 
@@ -51,6 +51,30 @@ pub(crate) fn compress_g2(point: &G2Affine) -> [u8; 96] {
     }
 
     bytes
+}
+
+pub(crate) fn decode_non_identity_g2(bytes: &[u8; 96]) -> Result<G2Affine, DecodeError> {
+    let mut point = MaybeUninit::<G2Affine>::uninit();
+
+    unsafe {
+        match blst::blst_p2_uncompress(point.as_mut_ptr(), bytes.as_ptr()) {
+            blst::BLST_ERROR::BLST_SUCCESS => {}
+            blst::BLST_ERROR::BLST_BAD_ENCODING => return Err(DecodeError::BadEncoding),
+            blst::BLST_ERROR::BLST_POINT_NOT_ON_CURVE => return Err(DecodeError::NotOnCurve),
+            blst::BLST_ERROR::BLST_POINT_NOT_IN_GROUP => return Err(DecodeError::NotInGroup),
+            blst::BLST_ERROR::BLST_PK_IS_INFINITY => return Err(DecodeError::PointAtInfinity),
+            error => unreachable!("unexpected BLST decoding error: {error:?}"),
+        }
+
+        let point = point.assume_init();
+        if blst::blst_p2_affine_is_inf(&point) {
+            return Err(DecodeError::PointAtInfinity);
+        }
+        if !blst::blst_p2_affine_in_g2(&point) {
+            return Err(DecodeError::NotInGroup);
+        }
+        Ok(point)
+    }
 }
 
 #[cfg(feature = "signing")]
