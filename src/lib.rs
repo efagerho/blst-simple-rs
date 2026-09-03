@@ -1,6 +1,5 @@
 #![no_std]
-// Stub phase: constants and helpers are wired up only when the BLST
-// implementations land. Dead-code and unused warnings are noise until then.
+// Some BLST-backed modules remain stubbed.
 // TODO: remove this allow together with the last `unimplemented!()`.
 #![allow(dead_code)]
 
@@ -11,13 +10,13 @@
 //! `BLS_SIG_BLS12381G2_XMD:SHA-256_SSWU_RO_POP_`. Proofs of possession use
 //! `BLS_POP_BLS12381G2_XMD:SHA-256_SSWU_RO_POP_`.
 //!
-//! BLST bindings are omitted. Operations that require BLST panic with
-//! `unimplemented!()`.
+//! Operations that have not yet been implemented panic with `unimplemented!()`.
 
 extern crate alloc;
 
 mod aggregate;
 mod error;
+mod ffi;
 mod message;
 mod proof;
 mod public_key;
@@ -45,7 +44,7 @@ pub use secret::{KeyMaterialTooShortError, SecretKey, SecretKeyError};
 pub use signature::Signature;
 pub use verify::AggregateVerifier;
 
-/// Internal placeholder for omitted BLST value representations.
+/// Internal placeholder for BLST value representations not yet implemented.
 ///
 /// Private fields of this type keep the public wrapper types opaque.
 #[derive(Clone, Copy, Debug, PartialEq, Eq, Hash)]
