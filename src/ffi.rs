@@ -8,7 +8,9 @@ use crate::DecodeError;
 use crate::suite::{PROOF_OF_POSSESSION_DST, SIGNATURE_DST};
 
 pub(crate) type G1Affine = blst::blst_p1_affine;
+pub(crate) type G1Projective = blst::blst_p1;
 pub(crate) type G2Affine = blst::blst_p2_affine;
+pub(crate) type G2Projective = blst::blst_p2;
 pub(crate) type PreparedLines = [blst::blst_fp6; 68];
 #[cfg(feature = "signing")]
 pub(crate) type Scalar = blst::blst_scalar;
@@ -101,6 +103,18 @@ pub(crate) fn compress_g2(point: &G2Affine) -> [u8; 96] {
 }
 
 pub(crate) fn decode_non_identity_g2(bytes: &[u8; 96]) -> Result<G2Affine, DecodeError> {
+    let point = decode_g2(bytes)?;
+
+    unsafe {
+        if blst::blst_p2_affine_is_inf(&point) {
+            return Err(DecodeError::PointAtInfinity);
+        }
+    }
+
+    Ok(point)
+}
+
+pub(crate) fn decode_g2(bytes: &[u8; 96]) -> Result<G2Affine, DecodeError> {
     let mut point = MaybeUninit::<G2Affine>::uninit();
 
     unsafe {
@@ -114,13 +128,64 @@ pub(crate) fn decode_non_identity_g2(bytes: &[u8; 96]) -> Result<G2Affine, Decod
         }
 
         let point = point.assume_init();
-        if blst::blst_p2_affine_is_inf(&point) {
-            return Err(DecodeError::PointAtInfinity);
-        }
         if !blst::blst_p2_affine_in_g2(&point) {
             return Err(DecodeError::NotInGroup);
         }
         Ok(point)
+    }
+}
+
+pub(crate) fn g1_from_affine(point: &G1Affine) -> G1Projective {
+    let mut projective = MaybeUninit::<G1Projective>::uninit();
+
+    unsafe {
+        blst::blst_p1_from_affine(projective.as_mut_ptr(), point);
+        projective.assume_init()
+    }
+}
+
+pub(crate) fn add_g1_affine(accumulator: &mut G1Projective, point: &G1Affine) {
+    unsafe {
+        let accumulator = accumulator as *mut G1Projective;
+        blst::blst_p1_add_or_double_affine(accumulator, accumulator, point);
+    }
+}
+
+pub(crate) fn g1_to_affine(point: &G1Projective) -> G1Affine {
+    let mut affine = MaybeUninit::<G1Affine>::uninit();
+
+    unsafe {
+        blst::blst_p1_to_affine(affine.as_mut_ptr(), point);
+        affine.assume_init()
+    }
+}
+
+pub(crate) fn g1_is_identity(point: &G1Projective) -> bool {
+    unsafe { blst::blst_p1_is_inf(point) }
+}
+
+pub(crate) fn g2_from_affine(point: &G2Affine) -> G2Projective {
+    let mut projective = MaybeUninit::<G2Projective>::uninit();
+
+    unsafe {
+        blst::blst_p2_from_affine(projective.as_mut_ptr(), point);
+        projective.assume_init()
+    }
+}
+
+pub(crate) fn add_g2_affine(accumulator: &mut G2Projective, point: &G2Affine) {
+    unsafe {
+        let accumulator = accumulator as *mut G2Projective;
+        blst::blst_p2_add_or_double_affine(accumulator, accumulator, point);
+    }
+}
+
+pub(crate) fn g2_to_affine(point: &G2Projective) -> G2Affine {
+    let mut affine = MaybeUninit::<G2Affine>::uninit();
+
+    unsafe {
+        blst::blst_p2_to_affine(affine.as_mut_ptr(), point);
+        affine.assume_init()
     }
 }
 
