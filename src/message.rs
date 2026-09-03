@@ -88,16 +88,7 @@ mod tests {
     use std::format;
 
     use super::{HashedMessage, PreparedMessage};
-
-    fn compressed(message: &HashedMessage) -> [u8; 96] {
-        let mut bytes = [0; 96];
-
-        unsafe {
-            blst::blst_p2_affine_compress(bytes.as_mut_ptr(), &message.point);
-        }
-
-        bytes
-    }
+    use crate::ffi;
 
     fn hash(message: &HashedMessage) -> u64 {
         let mut hasher = DefaultHasher::new();
@@ -122,7 +113,8 @@ mod tests {
 
     #[test]
     fn hashes_with_the_signature_ciphersuite() {
-        let actual = compressed(&HashedMessage::new(b"a\0\xffb"));
+        let message = HashedMessage::new(b"a\0\xffb");
+        let actual = ffi::compress_g2(&message.point);
         let expected = [
             145, 174, 185, 55, 24, 103, 238, 38, 66, 47, 216, 72, 105, 175, 236, 20, 165, 115, 56,
             101, 234, 45, 193, 49, 26, 86, 144, 62, 203, 109, 136, 65, 254, 152, 76, 167, 135, 233,
