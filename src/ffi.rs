@@ -5,14 +5,19 @@ use core::ptr;
 use core::sync::atomic::{Ordering, compiler_fence};
 
 use crate::DecodeError;
-use crate::suite::SIGNATURE_DST;
+use crate::suite::{PROOF_OF_POSSESSION_DST, SIGNATURE_DST};
 
+pub(crate) type G1Affine = blst::blst_p1_affine;
 pub(crate) type G2Affine = blst::blst_p2_affine;
 pub(crate) type PreparedLines = [blst::blst_fp6; 68];
 #[cfg(feature = "signing")]
 pub(crate) type Scalar = blst::blst_scalar;
 
 pub(crate) fn hash_message(message: &[u8]) -> G2Affine {
+    hash_to_g2(message, SIGNATURE_DST)
+}
+
+fn hash_to_g2(message: &[u8], dst: &[u8]) -> G2Affine {
     let mut projective = MaybeUninit::<blst::blst_p2>::uninit();
     let mut affine = MaybeUninit::<G2Affine>::uninit();
 
@@ -23,13 +28,47 @@ pub(crate) fn hash_message(message: &[u8]) -> G2Affine {
             projective.as_mut_ptr(),
             message.as_ptr(),
             message.len(),
-            SIGNATURE_DST.as_ptr(),
-            SIGNATURE_DST.len(),
+            dst.as_ptr(),
+            dst.len(),
             ptr::null(),
             0,
         );
         blst::blst_p2_to_affine(affine.as_mut_ptr(), projective.as_ptr());
         affine.assume_init()
+    }
+}
+
+pub(crate) fn compress_g1(point: &G1Affine) -> [u8; 48] {
+    let mut bytes = [0; 48];
+
+    unsafe {
+        blst::blst_p1_affine_compress(bytes.as_mut_ptr(), point);
+    }
+
+    bytes
+}
+
+pub(crate) fn decode_non_identity_g1(bytes: &[u8; 48]) -> Result<G1Affine, DecodeError> {
+    let mut point = MaybeUninit::<G1Affine>::uninit();
+
+    unsafe {
+        match blst::blst_p1_uncompress(point.as_mut_ptr(), bytes.as_ptr()) {
+            blst::BLST_ERROR::BLST_SUCCESS => {}
+            blst::BLST_ERROR::BLST_BAD_ENCODING => return Err(DecodeError::BadEncoding),
+            blst::BLST_ERROR::BLST_POINT_NOT_ON_CURVE => return Err(DecodeError::NotOnCurve),
+            blst::BLST_ERROR::BLST_POINT_NOT_IN_GROUP => return Err(DecodeError::NotInGroup),
+            blst::BLST_ERROR::BLST_PK_IS_INFINITY => return Err(DecodeError::PointAtInfinity),
+            error => unreachable!("unexpected BLST decoding error: {error:?}"),
+        }
+
+        let point = point.assume_init();
+        if blst::blst_p1_affine_is_inf(&point) {
+            return Err(DecodeError::PointAtInfinity);
+        }
+        if !blst::blst_p1_affine_in_g1(&point) {
+            return Err(DecodeError::NotInGroup);
+        }
+        Ok(point)
     }
 }
 
@@ -74,6 +113,35 @@ pub(crate) fn decode_non_identity_g2(bytes: &[u8; 96]) -> Result<G2Affine, Decod
             return Err(DecodeError::NotInGroup);
         }
         Ok(point)
+    }
+}
+
+pub(crate) fn verify_proof(public_key: &G1Affine, proof: &G2Affine) -> bool {
+    let public_key_bytes = compress_g1(public_key);
+    let message = hash_to_g2(&public_key_bytes, PROOF_OF_POSSESSION_DST);
+    let mut message_pairing = MaybeUninit::<blst::blst_fp12>::uninit();
+    let mut proof_pairing = MaybeUninit::<blst::blst_fp12>::uninit();
+
+    unsafe {
+        blst::blst_miller_loop(message_pairing.as_mut_ptr(), &message, public_key);
+        blst::blst_miller_loop(
+            proof_pairing.as_mut_ptr(),
+            proof,
+            blst::blst_p1_affine_generator(),
+        );
+        blst::blst_fp12_finalverify(message_pairing.as_ptr(), proof_pairing.as_ptr())
+    }
+}
+
+#[cfg(feature = "signing")]
+pub(crate) fn derive_public_key(scalar: &Scalar) -> G1Affine {
+    let mut projective = MaybeUninit::<blst::blst_p1>::uninit();
+    let mut affine = MaybeUninit::<G1Affine>::uninit();
+
+    unsafe {
+        blst::blst_sk_to_pk_in_g1(projective.as_mut_ptr(), scalar);
+        blst::blst_p1_to_affine(affine.as_mut_ptr(), projective.as_ptr());
+        affine.assume_init()
     }
 }
 

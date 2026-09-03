@@ -60,7 +60,7 @@ impl SecretKey {
     /// Derives the corresponding proof-capable public key.
     #[must_use]
     pub fn public_key(&self) -> PublicKey {
-        unimplemented!("public-key derivation requires BLST")
+        PublicKey::from_secret(ffi::derive_public_key(&self.scalar))
     }
 
     /// Hashes and signs arbitrary message bytes.
@@ -267,6 +267,18 @@ mod tests {
         let compatible =
             keygen::derive(&key_material, keygen::Parameters::compatibility()).unwrap();
         assert_eq!(simple.to_bytes(), compatible.to_bytes());
+    }
+
+    #[test]
+    fn derives_the_public_key() {
+        let scalar = hex("0000000000000000000000000000000000000000000000000000000000000001");
+        let secret_key = SecretKey::from_bytes(&scalar).unwrap();
+        let upstream = blst::min_pk::SecretKey::from_bytes(&scalar).unwrap();
+
+        assert_eq!(
+            secret_key.public_key().to_bytes(),
+            upstream.sk_to_pk().to_bytes()
+        );
     }
 
     #[test]
