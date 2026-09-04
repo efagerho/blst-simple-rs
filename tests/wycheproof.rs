@@ -1,4 +1,7 @@
+mod common;
+
 use blst_simple_rs::{HashedMessage, Signature, UnverifiedPublicKey};
+use common::{decode_hex, decode_hex_array};
 use serde::Deserialize;
 
 const VECTORS: &str = include_str!("vectors/wycheproof/bls_sig_g2_pop_verify_test.json");
@@ -113,29 +116,4 @@ fn verify_at_each_message_rung(public_key: &str, message: &str, signature: &str)
         signature.verify(&public_key, &hashed),
         signature.verify_prepared(&public_key, &prepared),
     ]
-}
-
-fn decode_hex_array<const N: usize>(input: &str) -> Option<[u8; N]> {
-    decode_hex(input)?.try_into().ok()
-}
-
-fn decode_hex(input: &str) -> Option<Vec<u8>> {
-    if input.len() % 2 != 0 {
-        return None;
-    }
-
-    input
-        .as_bytes()
-        .chunks_exact(2)
-        .map(|digits| Some(nibble(digits[0])? << 4 | nibble(digits[1])?))
-        .collect()
-}
-
-fn nibble(byte: u8) -> Option<u8> {
-    match byte {
-        b'0'..=b'9' => Some(byte - b'0'),
-        b'a'..=b'f' => Some(byte - b'a' + 10),
-        b'A'..=b'F' => Some(byte - b'A' + 10),
-        _ => None,
-    }
 }
