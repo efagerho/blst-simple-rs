@@ -732,10 +732,18 @@ mod tests {
 
     #[test]
     fn default_streaming_verifier_matches_new() {
-        let new = format!("{:?}", AggregateVerifier::new());
-        let default = format!("{:?}", AggregateVerifier::default());
+        let (key, signature) = participant(scalar(1), b"message");
+        let key = AggregatePublicKey::from(key);
+        let signature = AggregateSignature::from(signature);
+        let message = HashedMessage::new(b"message");
+        let mut new = AggregateVerifier::new();
+        let mut default = AggregateVerifier::default();
 
-        assert_eq!(new, default);
+        new.add(&key, &message);
+        default.add(&key, &message);
+
+        assert!(new.finish_and_reset(&signature));
+        assert!(default.finish_and_reset(&signature));
     }
 
     #[test]
