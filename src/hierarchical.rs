@@ -43,7 +43,7 @@ mod tests {
         let upstream = blst::min_pk::SecretKey::from_bytes(&scalar).unwrap();
 
         assert_eq!(
-            child(&parent, u32::MAX).to_bytes(),
+            child(&parent, u32::MAX).to_bytes_for_test(),
             upstream.derive_child_eip2333(u32::MAX).to_bytes()
         );
     }
