@@ -129,8 +129,6 @@ pub fn derive(
 
 #[cfg(test)]
 mod tests {
-    extern crate std;
-
     use std::format;
 
     use super::{KeyInfoTooLongError, MAX_KEY_INFO_LENGTH, Parameters, derive};

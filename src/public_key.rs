@@ -90,8 +90,6 @@ impl PublicKey {
 
 #[cfg(test)]
 mod tests {
-    extern crate std;
-
     use core::hash::{Hash, Hasher};
 
     use std::collections::hash_map::DefaultHasher;

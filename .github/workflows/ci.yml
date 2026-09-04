@@ -35,7 +35,7 @@ jobs:
       - name: Test default features
         run: cargo test --locked
 
-      - name: Test without default features
+      - name: Test without signing
         run: cargo test --locked --no-default-features
 
       - name: Test all features

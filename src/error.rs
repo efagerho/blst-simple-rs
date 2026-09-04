@@ -98,8 +98,6 @@ impl core::error::Error for AggregateError {}
 
 #[cfg(test)]
 mod tests {
-    extern crate std;
-
     use core::error::Error;
 
     use std::format;

@@ -1,13 +1,9 @@
-#![no_std]
-
 //! Safe Rust API for the minimal-public-key-size proof-of-possession scheme in
 //! *BLS Signatures* (`draft-irtf-cfrg-bls-signature-07`).
 //!
 //! Signatures use
 //! `BLS_SIG_BLS12381G2_XMD:SHA-256_SSWU_RO_POP_`. Proofs of possession use
 //! `BLS_POP_BLS12381G2_XMD:SHA-256_SSWU_RO_POP_`.
-
-extern crate alloc;
 
 mod aggregate;
 mod error;

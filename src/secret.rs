@@ -170,8 +170,6 @@ pub(crate) fn validate_key_material_length(bytes: &[u8]) -> Result<(), KeyMateri
 
 #[cfg(test)]
 mod tests {
-    extern crate std;
-
     use core::mem::size_of;
 
     use std::format;
