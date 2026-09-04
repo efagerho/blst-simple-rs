@@ -28,17 +28,6 @@ impl UnverifiedPublicKey {
             .then_some(PublicKey { unverified: *self })
             .ok_or(InvalidProofError)
     }
-
-    /// Treats this key as though its proof of possession was verified.
-    ///
-    /// Bypassing proof verification can make aggregate signatures forgeable.
-    /// The caller must have verified a valid proof for this exact key through
-    /// another trusted mechanism.
-    #[cfg(feature = "dangerous-proof-bypass")]
-    #[must_use]
-    pub fn assume_proof_verified(self) -> PublicKey {
-        PublicKey { unverified: self }
-    }
 }
 
 impl Hash for UnverifiedPublicKey {
@@ -179,13 +168,13 @@ mod tests {
         assert_eq!(key.verify_proof(&proof), Err(InvalidProofError));
     }
 
-    #[cfg(feature = "dangerous-proof-bypass")]
+    #[cfg(blst_simple_dangerous)]
     #[test]
     fn proof_bypass_preserves_the_admitted_key() {
         let (bytes, _) = key_and_proof([1; 32]);
         let unverified = UnverifiedPublicKey::from_bytes(&bytes).unwrap();
 
-        let key = unverified.assume_proof_verified();
+        let key = crate::dangerous::assume_proof_verified(unverified);
 
         assert_eq!(key.as_unverified(), &unverified);
         assert_eq!(key.to_bytes(), bytes);

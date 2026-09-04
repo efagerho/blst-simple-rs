@@ -2,15 +2,16 @@ mod common;
 
 #[cfg(feature = "signing")]
 use blst_simple_rs::SecretKey;
-#[cfg(feature = "dangerous-proof-bypass")]
+#[cfg(blst_simple_dangerous)]
 use blst_simple_rs::{
-    AggregatePublicKey, AggregateVerifier, HashedMessage, PublicKey, Signature, UnverifiedPublicKey,
+    AggregatePublicKey, AggregateVerifier, HashedMessage, PublicKey, Signature,
+    UnverifiedPublicKey, dangerous::assume_proof_verified,
 };
 use blst_simple_rs::{AggregateSignature, AggregateSignatureBuilder};
-#[cfg(any(feature = "signing", feature = "dangerous-proof-bypass"))]
+#[cfg(any(feature = "signing", blst_simple_dangerous))]
 use common::decode_hex;
 use common::decode_hex_array;
-#[cfg(feature = "dangerous-proof-bypass")]
+#[cfg(blst_simple_dangerous)]
 use common::{
     SINGLE_VERIFICATION_PATHS, verify_fast_aggregate_at_each_entry_point,
     verify_single_at_each_entry_point,
@@ -63,7 +64,7 @@ const AGGREGATE_FIXTURES: &[Fixture] = fixtures!("aggregate";
     "aggregate_single_signature",
 );
 
-#[cfg(feature = "dangerous-proof-bypass")]
+#[cfg(blst_simple_dangerous)]
 const AGGREGATE_VERIFY_FIXTURES: &[Fixture] = fixtures!("aggregate_verify";
     "aggregate_verify_infinity_pubkey",
     "aggregate_verify_na_pubkeys_and_infinity_signature",
@@ -72,7 +73,7 @@ const AGGREGATE_VERIFY_FIXTURES: &[Fixture] = fixtures!("aggregate_verify";
     "aggregate_verify_valid",
 );
 
-#[cfg(feature = "dangerous-proof-bypass")]
+#[cfg(blst_simple_dangerous)]
 const FAST_AGGREGATE_VERIFY_FIXTURES: &[Fixture] = fixtures!("fast_aggregate_verify";
     "fast_aggregate_verify_extra_pubkey_4f079f946446fabf",
     "fast_aggregate_verify_extra_pubkey_5a38e6b4017fe4dd",
@@ -88,7 +89,7 @@ const FAST_AGGREGATE_VERIFY_FIXTURES: &[Fixture] = fixtures!("fast_aggregate_ver
     "fast_aggregate_verify_valid_652ce62f09290811",
 );
 
-#[cfg(feature = "dangerous-proof-bypass")]
+#[cfg(blst_simple_dangerous)]
 const VERIFY_FIXTURES: &[Fixture] = fixtures!("verify";
     "verify_infinity_pubkey_and_infinity_signature",
     "verify_tampered_signature_case_195246ee3bd3b6ec",
@@ -134,7 +135,7 @@ struct SignInput {
     message: String,
 }
 
-#[cfg(feature = "dangerous-proof-bypass")]
+#[cfg(blst_simple_dangerous)]
 #[derive(Deserialize)]
 struct AggregateVerifyInput {
     pubkeys: Vec<String>,
@@ -142,7 +143,7 @@ struct AggregateVerifyInput {
     signature: String,
 }
 
-#[cfg(feature = "dangerous-proof-bypass")]
+#[cfg(blst_simple_dangerous)]
 #[derive(Deserialize)]
 struct FastAggregateVerifyInput {
     pubkeys: Vec<String>,
@@ -150,7 +151,7 @@ struct FastAggregateVerifyInput {
     signature: String,
 }
 
-#[cfg(feature = "dangerous-proof-bypass")]
+#[cfg(blst_simple_dangerous)]
 #[derive(Deserialize)]
 struct VerifyInput {
     pubkey: String,
@@ -188,7 +189,7 @@ fn aggregation() {
     }
 }
 
-#[cfg(feature = "dangerous-proof-bypass")]
+#[cfg(blst_simple_dangerous)]
 #[test]
 fn aggregate_verification() {
     for fixture in AGGREGATE_VERIFY_FIXTURES {
@@ -209,7 +210,7 @@ fn aggregate_verification() {
     }
 }
 
-#[cfg(feature = "dangerous-proof-bypass")]
+#[cfg(blst_simple_dangerous)]
 #[test]
 fn fast_aggregate_verification() {
     for fixture in FAST_AGGREGATE_VERIFY_FIXTURES {
@@ -222,7 +223,7 @@ fn fast_aggregate_verification() {
     }
 }
 
-#[cfg(feature = "dangerous-proof-bypass")]
+#[cfg(blst_simple_dangerous)]
 #[test]
 fn verification() {
     for fixture in VERIFY_FIXTURES {
@@ -268,7 +269,7 @@ fn aggregate(inputs: &[String]) -> Option<[u8; 96]> {
     Some(builder.finish().to_bytes())
 }
 
-#[cfg(feature = "dangerous-proof-bypass")]
+#[cfg(blst_simple_dangerous)]
 fn aggregate_verify_at_each_message_rung(input: &AggregateVerifyInput) -> [bool; 4] {
     if input.pubkeys.len() != input.messages.len() {
         return [false; 4];
@@ -312,7 +313,7 @@ fn aggregate_verify_at_each_message_rung(input: &AggregateVerifyInput) -> [bool;
     ]
 }
 
-#[cfg(feature = "dangerous-proof-bypass")]
+#[cfg(blst_simple_dangerous)]
 fn fast_aggregate_verify_at_each_entry_point(input: &FastAggregateVerifyInput) -> [bool; 10] {
     let Some(signature) = decode_aggregate_signature(&input.signature) else {
         return [false; 10];
@@ -326,7 +327,7 @@ fn fast_aggregate_verify_at_each_entry_point(input: &FastAggregateVerifyInput) -
     verify_fast_aggregate_at_each_entry_point(&keys, &message, &signature)
 }
 
-#[cfg(feature = "dangerous-proof-bypass")]
+#[cfg(blst_simple_dangerous)]
 fn verify_at_each_entry_point(input: &VerifyInput) -> [bool; 13] {
     let Some(public_key) = decode_public_key(&input.pubkey) else {
         return [false; 13];
@@ -342,13 +343,13 @@ fn verify_at_each_entry_point(input: &VerifyInput) -> [bool; 13] {
     verify_single_at_each_entry_point(&public_key, &message, &signature)
 }
 
-#[cfg(feature = "dangerous-proof-bypass")]
+#[cfg(blst_simple_dangerous)]
 fn decode_aggregate_signature(input: &str) -> Option<AggregateSignature> {
     let bytes = decode_hex_array(input)?;
     AggregateSignature::from_bytes(&bytes).ok()
 }
 
-#[cfg(feature = "dangerous-proof-bypass")]
+#[cfg(blst_simple_dangerous)]
 fn decode_public_keys(inputs: &[String]) -> Option<Vec<PublicKey>> {
     inputs
         .iter()
@@ -356,13 +357,13 @@ fn decode_public_keys(inputs: &[String]) -> Option<Vec<PublicKey>> {
         .collect()
 }
 
-#[cfg(feature = "dangerous-proof-bypass")]
+#[cfg(blst_simple_dangerous)]
 fn decode_public_key(input: &str) -> Option<PublicKey> {
     let bytes = decode_hex_array(input)?;
     let key = UnverifiedPublicKey::from_bytes(&bytes).ok()?;
 
     // The fixtures omit proofs and supply expected pairing results.
-    Some(key.assume_proof_verified())
+    Some(assume_proof_verified(key))
 }
 
 fn parse<T: DeserializeOwned>(fixture: &Fixture) -> T {

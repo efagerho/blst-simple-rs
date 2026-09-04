@@ -19,6 +19,12 @@ mod signature;
 mod suite;
 mod verify;
 
+/// APIs that bypass validation enforced by the crate's safe types.
+///
+/// This module is available only when the crate is compiled with
+/// `--cfg blst_simple_dangerous`.
+#[cfg(blst_simple_dangerous)]
+pub mod dangerous;
 #[cfg(feature = "signing")]
 pub mod hierarchical;
 #[cfg(feature = "signing")]

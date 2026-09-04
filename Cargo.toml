@@ -9,11 +9,12 @@ repository = "https://github.com/efagerho/blst-simple-rs"
 
 [features]
 default = ["signing"]
-dangerous = ["dangerous-proof-bypass", "secret-key-export"]
-dangerous-proof-bypass = []
 secret-key-export = ["signing"]
 signing = []
 portable = ["blst/portable"]
+
+[lints.rust]
+unexpected_cfgs = { level = "warn", check-cfg = ["cfg(blst_simple_dangerous)"] }
 
 [dependencies]
 blst = { version = "=0.3.17", default-features = false }
@@ -21,8 +22,3 @@ blst = { version = "=0.3.17", default-features = false }
 [dev-dependencies]
 serde = { version = "1.0", features = ["derive"] }
 serde_json = "1.0"
-
-[[test]]
-name = "wycheproof"
-path = "tests/wycheproof.rs"
-required-features = ["dangerous-proof-bypass"]
