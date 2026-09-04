@@ -8,6 +8,20 @@ permissions:
   contents: read
 
 jobs:
+  msrv:
+    name: Rust 1.85
+    runs-on: ubuntu-24.04
+
+    steps:
+      - name: Check out repository
+        uses: actions/checkout@v6
+
+      - name: Install Rust 1.85
+        uses: dtolnay/rust-toolchain@1.85.0
+
+      - name: Check all features
+        run: cargo check --locked --all-features
+
   checks:
     name: Rust checks (x86-64)
     runs-on: ubuntu-24.04
