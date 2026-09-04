@@ -86,6 +86,42 @@ mod tests {
 
     use super::{HashedMessage, PreparedMessage};
     use crate::ffi;
+    use serde::Deserialize;
+
+    const SCALAR_ONE_VECTOR: &str = include_str!(
+        "../tests/vectors/ethereum/v0.1.0/verify/verifycase_one_privkey_47117849458281be.json"
+    );
+
+    #[derive(Deserialize)]
+    struct VerificationVector {
+        input: VerificationInput,
+        output: bool,
+    }
+
+    #[derive(Deserialize)]
+    struct VerificationInput {
+        message: String,
+        signature: String,
+    }
+
+    fn hex<const N: usize>(input: &str) -> [u8; N] {
+        fn nibble(byte: u8) -> u8 {
+            match byte {
+                b'0'..=b'9' => byte - b'0',
+                b'a'..=b'f' => byte - b'a' + 10,
+                b'A'..=b'F' => byte - b'A' + 10,
+                _ => panic!("invalid hexadecimal digit"),
+            }
+        }
+
+        let input = input.strip_prefix("0x").unwrap_or(input);
+        assert_eq!(input.len(), N * 2);
+        let mut output = [0; N];
+        for (byte, digits) in output.iter_mut().zip(input.as_bytes().chunks_exact(2)) {
+            *byte = (nibble(digits[0]) << 4) | nibble(digits[1]);
+        }
+        output
+    }
 
     fn hash(message: &HashedMessage) -> u64 {
         let mut hasher = DefaultHasher::new();
@@ -127,6 +163,17 @@ mod tests {
         ];
 
         assert_eq!(actual, expected);
+    }
+
+    #[test]
+    fn hash_matches_the_scalar_one_signature_vector() {
+        let vector: VerificationVector = serde_json::from_str(SCALAR_ONE_VECTOR).unwrap();
+        let message: [u8; 32] = hex(&vector.input.message);
+        let expected: [u8; 96] = hex(&vector.input.signature);
+        let hashed = HashedMessage::new(&message);
+
+        assert!(vector.output);
+        assert_eq!(ffi::compress_g2(&hashed.point), expected);
     }
 
     #[test]
