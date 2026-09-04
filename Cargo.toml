@@ -9,6 +9,7 @@ repository = "https://github.com/efagerho/blst-simple-rs"
 
 [features]
 default = ["std", "signing"]
+secret-key-export = ["signing"]
 std = []
 signing = []
 portable = ["blst/portable"]

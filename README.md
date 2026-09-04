@@ -7,6 +7,10 @@ important cryptographic distinctions and validation state in the type system.
 The crate currently implements the minimal-public-key-size proof-of-possession
 ciphersuite.
 
+Secret-key export is disabled by default. Enable the `secret-key-export`
+feature to make `SecretKey::to_bytes` available. Enabling it also enables
+`signing`.
+
 ## CPU features
 
 On x86_64, BLST automatically detects ADX support on the build host and uses it

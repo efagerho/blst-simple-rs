@@ -141,7 +141,7 @@ mod tests {
         let actual = derive(&[42; 32], parameters).unwrap();
         let expected = blst::min_pk::SecretKey::key_gen_v5(&[42; 32], b"", b"").unwrap();
 
-        assert_eq!(actual.to_bytes(), expected.to_bytes());
+        assert_eq!(actual.to_bytes_for_test(), expected.to_bytes());
     }
 
     #[test]
@@ -151,7 +151,7 @@ mod tests {
         let actual = derive(&[42; 32], parameters).unwrap();
         let expected = blst::min_pk::SecretKey::key_gen_v5(&[42; 32], b"salt", &maximum).unwrap();
 
-        assert_eq!(actual.to_bytes(), expected.to_bytes());
+        assert_eq!(actual.to_bytes_for_test(), expected.to_bytes());
 
         let excessive = [0; MAX_KEY_INFO_LENGTH + 1];
         assert_eq!(

@@ -49,9 +49,7 @@ impl SecretKey {
     /// Exports this scalar as 32 big-endian bytes.
     ///
     /// The caller is responsible for erasing the returned bytes.
-    // TODO: probably hide this behind a dedicated feature enabled only by
-    // special tooling, for instance offline key generation for later import,
-    // so ordinary builds cannot export secret scalars at all.
+    #[cfg(feature = "secret-key-export")]
     #[must_use]
     pub fn to_bytes(&self) -> [u8; 32] {
         ffi::encode_scalar(&self.scalar)
@@ -97,6 +95,13 @@ impl SecretKey {
         Self {
             scalar: ffi::derive_hierarchical_child(&self.scalar, index),
         }
+    }
+}
+
+#[cfg(test)]
+impl SecretKey {
+    pub(crate) fn to_bytes_for_test(&self) -> [u8; 32] {
+        ffi::encode_scalar(&self.scalar)
     }
 }
 
@@ -232,7 +237,7 @@ mod tests {
         ));
 
         let secret_key = SecretKey::from_bytes(&largest_valid).unwrap();
-        assert_eq!(secret_key.to_bytes(), largest_valid);
+        assert_eq!(secret_key.to_bytes_for_test(), largest_valid);
     }
 
     #[test]
@@ -247,12 +252,17 @@ mod tests {
             hex("2d18bd6c14e6d15bf8b5085c9b74f3daae3b03cc2014770a599d8c1539e50f8e");
 
         let master = hierarchical::master(&seed).unwrap();
-        assert_eq!(master.to_bytes(), expected_master);
+        assert_eq!(master.to_bytes_for_test(), expected_master);
         assert_eq!(
-            SecretKey::from_key_material(&seed).unwrap().to_bytes(),
+            SecretKey::from_key_material(&seed)
+                .unwrap()
+                .to_bytes_for_test(),
             expected_master
         );
-        assert_eq!(hierarchical::child(&master, 0).to_bytes(), expected_child);
+        assert_eq!(
+            hierarchical::child(&master, 0).to_bytes_for_test(),
+            expected_child
+        );
     }
 
     #[test]
@@ -267,15 +277,15 @@ mod tests {
         .unwrap();
 
         let upstream = blst::min_pk::SecretKey::key_gen_v5(&key_material, b"", b"context").unwrap();
-        assert_eq!(informed.to_bytes(), upstream.to_bytes());
+        assert_eq!(informed.to_bytes_for_test(), upstream.to_bytes());
 
-        assert_ne!(empty.to_bytes(), salted.to_bytes());
-        assert_ne!(empty.to_bytes(), informed.to_bytes());
+        assert_ne!(empty.to_bytes_for_test(), salted.to_bytes_for_test());
+        assert_ne!(empty.to_bytes_for_test(), informed.to_bytes_for_test());
 
         let simple = SecretKey::from_key_material(&key_material).unwrap();
         let compatible =
             keygen::derive(&key_material, keygen::Parameters::compatibility()).unwrap();
-        assert_eq!(simple.to_bytes(), compatible.to_bytes());
+        assert_eq!(simple.to_bytes_for_test(), compatible.to_bytes_for_test());
     }
 
     #[test]
@@ -288,6 +298,16 @@ mod tests {
             secret_key.public_key().to_bytes(),
             upstream.sk_to_pk().to_bytes()
         );
+    }
+
+    #[cfg(feature = "secret-key-export")]
+    #[test]
+    fn exports_the_secret_scalar() {
+        let mut scalar = [0; 32];
+        scalar[31] = 1;
+        let secret_key = SecretKey::from_bytes(&scalar).unwrap();
+
+        assert_eq!(secret_key.to_bytes(), scalar);
     }
 
     #[test]

@@ -351,7 +351,7 @@ pub(crate) fn decode_scalar(bytes: &[u8; 32]) -> Option<Scalar> {
     }
 }
 
-#[cfg(feature = "signing")]
+#[cfg(any(feature = "secret-key-export", all(test, feature = "signing")))]
 pub(crate) fn encode_scalar(scalar: &Scalar) -> [u8; 32] {
     let mut bytes = [0; 32];
 
