@@ -98,7 +98,10 @@ mod tests {
 
     #[test]
     fn hashes_empty_and_binary_messages() {
-        let _ = HashedMessage::new(b"");
+        let empty = HashedMessage::new(b"");
+        let prepared_empty = PreparedMessage::hash_and_prepare(b"");
+
+        assert_eq!(prepared_empty.as_hashed_message(), &empty);
         let _ = HashedMessage::new(b"a\0\xffb");
     }
 

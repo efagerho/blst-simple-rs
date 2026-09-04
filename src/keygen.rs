@@ -129,7 +129,16 @@ pub fn derive(
 
 #[cfg(test)]
 mod tests {
-    use super::{KeyInfoTooLongError, MAX_KEY_INFO_LENGTH, Parameters};
+    use super::{KeyInfoTooLongError, MAX_KEY_INFO_LENGTH, Parameters, derive};
+
+    #[test]
+    fn accepts_empty_salt_and_key_info() {
+        let parameters = Parameters::new(b"").with_info(b"").unwrap();
+        let actual = derive(&[42; 32], parameters).unwrap();
+        let expected = blst::min_pk::SecretKey::key_gen_v5(&[42; 32], b"", b"").unwrap();
+
+        assert_eq!(actual.to_bytes(), expected.to_bytes());
+    }
 
     #[test]
     fn limits_key_info_length() {
