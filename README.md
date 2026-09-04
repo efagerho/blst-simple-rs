@@ -11,6 +11,12 @@ Secret-key export is disabled by default. Enable the `secret-key-export`
 feature to make `SecretKey::to_bytes` available. Enabling it also enables
 `signing`.
 
+The `dangerous-proof-bypass` feature adds
+`UnverifiedPublicKey::assume_proof_verified`. Enabling it permits callers to
+bypass proof-of-possession verification and can make aggregate signatures
+forgeable if misused. Only use this if you understand the cryptography and
+know what you're doing.
+
 ## CPU features
 
 On x86_64, BLST automatically detects ADX support on the build host and uses it

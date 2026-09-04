@@ -21,7 +21,6 @@ mod signature;
 mod suite;
 mod verify;
 
-pub mod dangerous;
 #[cfg(feature = "signing")]
 pub mod hierarchical;
 #[cfg(feature = "signing")]
