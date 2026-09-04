@@ -71,6 +71,24 @@ pub enum AggregateError {
     InvalidKeyCombination,
 }
 
+/// A streaming verifier received more distinct messages than configured.
+#[derive(Clone, Copy, Debug, PartialEq, Eq)]
+#[non_exhaustive]
+pub struct TooManyDistinctMessagesError {
+    /// The configured maximum number of distinct messages.
+    pub maximum: usize,
+}
+
+impl fmt::Display for TooManyDistinctMessagesError {
+    fn fmt(&self, f: &mut fmt::Formatter<'_>) -> fmt::Result {
+        write!(
+            f,
+            "distinct message limit exceeded (maximum {})",
+            self.maximum
+        )
+    }
+}
+
 impl fmt::Display for AggregateError {
     fn fmt(&self, f: &mut fmt::Formatter<'_>) -> fmt::Result {
         match self {
@@ -96,13 +114,18 @@ impl core::error::Error for ProofVerificationError {
 
 impl core::error::Error for AggregateError {}
 
+impl core::error::Error for TooManyDistinctMessagesError {}
+
 #[cfg(test)]
 mod tests {
     use core::error::Error;
 
     use std::format;
 
-    use super::{AggregateError, DecodeError, InvalidProofError, ProofVerificationError};
+    use super::{
+        AggregateError, DecodeError, InvalidProofError, ProofVerificationError,
+        TooManyDistinctMessagesError,
+    };
 
     #[test]
     fn displays_every_error_variant() {
@@ -151,6 +174,10 @@ mod tests {
         assert_eq!(
             format!("{}", AggregateError::InvalidKeyCombination),
             "public keys form an invalid aggregate combination"
+        );
+        assert_eq!(
+            format!("{}", TooManyDistinctMessagesError { maximum: 4 }),
+            "distinct message limit exceeded (maximum 4)"
         );
     }
 

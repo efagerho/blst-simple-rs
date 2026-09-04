@@ -27,7 +27,10 @@ pub mod keygen;
 pub use aggregate::{
     AggregatePublicKey, AggregatePublicKeyBuilder, AggregateSignature, AggregateSignatureBuilder,
 };
-pub use error::{AggregateError, DecodeError, InvalidProofError, ProofVerificationError};
+pub use error::{
+    AggregateError, DecodeError, InvalidProofError, ProofVerificationError,
+    TooManyDistinctMessagesError,
+};
 #[cfg(feature = "signing")]
 pub use keygen::KeyInfoTooLongError;
 pub use message::{HashedMessage, PreparedMessage};
