@@ -24,6 +24,8 @@ fn hash_to_g2(message: &[u8], dst: &[u8]) -> G2Affine {
     let projective = hash_to_g2_projective(message, dst);
     let mut affine = MaybeUninit::<G2Affine>::uninit();
 
+    // SAFETY: `projective` is initialized, and BLST writes one complete
+    // `G2Affine` to the properly aligned output before it is read.
     unsafe {
         blst::blst_p2_to_affine(affine.as_mut_ptr(), &projective);
         affine.assume_init()
@@ -33,9 +35,10 @@ fn hash_to_g2(message: &[u8], dst: &[u8]) -> G2Affine {
 fn hash_to_g2_projective(message: &[u8], dst: &[u8]) -> blst::blst_p2 {
     let mut projective = MaybeUninit::<blst::blst_p2>::uninit();
 
+    // SAFETY: The slice pointers are valid for their corresponding lengths.
+    // BLST accepts a null augmentation with length zero and initializes the
+    // complete projective output.
     unsafe {
-        // BLST initializes the output and accepts a null augmentation when its
-        // length is zero.
         blst::blst_hash_to_g2(
             projective.as_mut_ptr(),
             message.as_ptr(),
@@ -52,6 +55,8 @@ fn hash_to_g2_projective(message: &[u8], dst: &[u8]) -> blst::blst_p2 {
 pub(crate) fn compress_g1(point: &G1Affine) -> [u8; 48] {
     let mut bytes = [0; 48];
 
+    // SAFETY: `point` is initialized, and `bytes` has the 48 bytes required
+    // for a compressed G1 encoding.
     unsafe {
         blst::blst_p1_affine_compress(bytes.as_mut_ptr(), point);
     }
@@ -73,6 +78,9 @@ fn decode_status(status: blst::BLST_ERROR) -> Result<(), DecodeError> {
 pub(crate) fn decode_non_identity_g1(bytes: &[u8; 48]) -> Result<G1Affine, DecodeError> {
     let mut point = MaybeUninit::<G1Affine>::uninit();
 
+    // SAFETY: `bytes` contains 48 readable bytes and `point` is aligned output
+    // storage. A successful uncompress call initializes `point` before the
+    // predicates or Rust read it.
     unsafe {
         decode_status(blst::blst_p1_uncompress(point.as_mut_ptr(), bytes.as_ptr()))?;
 
@@ -90,8 +98,9 @@ pub(crate) fn decode_non_identity_g1(bytes: &[u8; 48]) -> Result<G1Affine, Decod
 pub(crate) fn precompute_lines(message: &G2Affine) -> Box<PreparedLines> {
     let mut lines = Box::<PreparedLines>::new_uninit();
 
+    // SAFETY: `message` is initialized, and the aligned boxed output has room
+    // for all 68 coefficients that BLST initializes.
     unsafe {
-        // BLST initializes all 68 coefficients in the aligned boxed array.
         blst::blst_precompute_lines(lines.as_mut_ptr().cast(), message);
         lines.assume_init()
     }
@@ -100,6 +109,8 @@ pub(crate) fn precompute_lines(message: &G2Affine) -> Box<PreparedLines> {
 pub(crate) fn compress_g2(point: &G2Affine) -> [u8; 96] {
     let mut bytes = [0; 96];
 
+    // SAFETY: `point` is initialized, and `bytes` has the 96 bytes required
+    // for a compressed G2 encoding.
     unsafe {
         blst::blst_p2_affine_compress(bytes.as_mut_ptr(), point);
     }
@@ -110,6 +121,8 @@ pub(crate) fn compress_g2(point: &G2Affine) -> [u8; 96] {
 pub(crate) fn decode_non_identity_g2(bytes: &[u8; 96]) -> Result<G2Affine, DecodeError> {
     let point = decode_g2(bytes)?;
 
+    // SAFETY: `point` was fully initialized by `decode_g2` and remains valid
+    // for the duration of this read-only predicate call.
     unsafe {
         if blst::blst_p2_affine_is_inf(&point) {
             return Err(DecodeError::PointAtInfinity);
@@ -122,6 +135,9 @@ pub(crate) fn decode_non_identity_g2(bytes: &[u8; 96]) -> Result<G2Affine, Decod
 pub(crate) fn decode_g2(bytes: &[u8; 96]) -> Result<G2Affine, DecodeError> {
     let mut point = MaybeUninit::<G2Affine>::uninit();
 
+    // SAFETY: `bytes` contains 96 readable bytes and `point` is aligned output
+    // storage. A successful uncompress call initializes `point` before the
+    // predicate or Rust reads it.
     unsafe {
         decode_status(blst::blst_p2_uncompress(point.as_mut_ptr(), bytes.as_ptr()))?;
 
@@ -136,6 +152,8 @@ pub(crate) fn decode_g2(bytes: &[u8; 96]) -> Result<G2Affine, DecodeError> {
 pub(crate) fn g1_from_affine(point: &G1Affine) -> G1Projective {
     let mut projective = MaybeUninit::<G1Projective>::uninit();
 
+    // SAFETY: `point` is initialized, and BLST writes one complete
+    // `G1Projective` to the properly aligned output before it is read.
     unsafe {
         blst::blst_p1_from_affine(projective.as_mut_ptr(), point);
         projective.assume_init()
@@ -143,6 +161,8 @@ pub(crate) fn g1_from_affine(point: &G1Affine) -> G1Projective {
 }
 
 pub(crate) fn add_g1_affine(accumulator: &mut G1Projective, point: &G1Affine) {
+    // SAFETY: Both points are initialized, and BLST supports aliasing its
+    // projective output with its projective input for in-place accumulation.
     unsafe {
         let accumulator = accumulator as *mut G1Projective;
         blst::blst_p1_add_or_double_affine(accumulator, accumulator, point);
@@ -152,6 +172,8 @@ pub(crate) fn add_g1_affine(accumulator: &mut G1Projective, point: &G1Affine) {
 pub(crate) fn g1_to_affine(point: &G1Projective) -> G1Affine {
     let mut affine = MaybeUninit::<G1Affine>::uninit();
 
+    // SAFETY: `point` is initialized, and BLST writes one complete `G1Affine`
+    // to the properly aligned output before it is read.
     unsafe {
         blst::blst_p1_to_affine(affine.as_mut_ptr(), point);
         affine.assume_init()
@@ -159,12 +181,15 @@ pub(crate) fn g1_to_affine(point: &G1Projective) -> G1Affine {
 }
 
 pub(crate) fn g1_is_identity(point: &G1Projective) -> bool {
+    // SAFETY: `point` is initialized and valid for this read-only predicate.
     unsafe { blst::blst_p1_is_inf(point) }
 }
 
 pub(crate) fn g2_from_affine(point: &G2Affine) -> G2Projective {
     let mut projective = MaybeUninit::<G2Projective>::uninit();
 
+    // SAFETY: `point` is initialized, and BLST writes one complete
+    // `G2Projective` to the properly aligned output before it is read.
     unsafe {
         blst::blst_p2_from_affine(projective.as_mut_ptr(), point);
         projective.assume_init()
@@ -172,6 +197,8 @@ pub(crate) fn g2_from_affine(point: &G2Affine) -> G2Projective {
 }
 
 pub(crate) fn add_g2_affine(accumulator: &mut G2Projective, point: &G2Affine) {
+    // SAFETY: Both points are initialized, and BLST supports aliasing its
+    // projective output with its projective input for in-place accumulation.
     unsafe {
         let accumulator = accumulator as *mut G2Projective;
         blst::blst_p2_add_or_double_affine(accumulator, accumulator, point);
@@ -181,6 +208,8 @@ pub(crate) fn add_g2_affine(accumulator: &mut G2Projective, point: &G2Affine) {
 pub(crate) fn g2_to_affine(point: &G2Projective) -> G2Affine {
     let mut affine = MaybeUninit::<G2Affine>::uninit();
 
+    // SAFETY: `point` is initialized, and BLST writes one complete `G2Affine`
+    // to the properly aligned output before it is read.
     unsafe {
         blst::blst_p2_to_affine(affine.as_mut_ptr(), point);
         affine.assume_init()
@@ -188,6 +217,7 @@ pub(crate) fn g2_to_affine(point: &G2Projective) -> G2Affine {
 }
 
 fn g2_is_identity(point: &G2Affine) -> bool {
+    // SAFETY: `point` is initialized and valid for this read-only predicate.
     unsafe { blst::blst_p2_affine_is_inf(point) }
 }
 
@@ -208,6 +238,8 @@ pub(crate) fn verify_prepared_signature(
 pub(crate) fn miller_loop(key: &G1Affine, message: &G2Affine) -> MillerLoopResult {
     let mut result = MaybeUninit::<MillerLoopResult>::uninit();
 
+    // SAFETY: Both input points are initialized, and BLST writes one complete
+    // Miller-loop result to the properly aligned output before it is read.
     unsafe {
         blst::blst_miller_loop(result.as_mut_ptr(), message, key);
         result.assume_init()
@@ -227,6 +259,9 @@ pub(crate) fn miller_loop_many(keys: &[G1Affine], messages: &[G2Affine]) -> Mill
     }
 
     let mut result = MaybeUninit::<MillerLoopResult>::uninit();
+    // SAFETY: The assertions bound the nonzero count by both pointer arrays.
+    // Their first `keys.len()` entries point to initialized values that remain
+    // alive for the call, and BLST initializes the complete output.
     unsafe {
         blst::blst_miller_loop_n(
             result.as_mut_ptr(),
@@ -241,6 +276,8 @@ pub(crate) fn miller_loop_many(keys: &[G1Affine], messages: &[G2Affine]) -> Mill
 pub(crate) fn miller_loop_prepared(key: &G1Affine, lines: &PreparedLines) -> MillerLoopResult {
     let mut result = MaybeUninit::<MillerLoopResult>::uninit();
 
+    // SAFETY: `key` and all 68 prepared coefficients are initialized, and BLST
+    // writes one complete Miller-loop result before it is read.
     unsafe {
         blst::blst_miller_loop_lines(result.as_mut_ptr(), lines.as_ptr(), key);
         result.assume_init()
@@ -248,10 +285,13 @@ pub(crate) fn miller_loop_prepared(key: &G1Affine, lines: &PreparedLines) -> Mil
 }
 
 pub(crate) fn miller_loop_identity() -> MillerLoopResult {
+    // SAFETY: BLST returns a non-null pointer to a static, initialized value.
     unsafe { *blst::blst_fp12_one() }
 }
 
 pub(crate) fn multiply_miller_loop(accumulator: &mut MillerLoopResult, term: &MillerLoopResult) {
+    // SAFETY: Both operands are initialized, and BLST supports aliasing the
+    // output with the first input for in-place multiplication.
     unsafe {
         let accumulator = accumulator as *mut MillerLoopResult;
         blst::blst_fp12_mul(accumulator, accumulator, term);
@@ -262,6 +302,8 @@ pub(crate) fn verify_miller_loop_product(product: &MillerLoopResult, signature: 
     let signature = if g2_is_identity(signature) {
         miller_loop_identity()
     } else {
+        // SAFETY: `signature` and BLST's static generator are initialized.
+        // BLST writes one complete Miller-loop result before it is read.
         unsafe {
             let mut result = MaybeUninit::<MillerLoopResult>::uninit();
             blst::blst_miller_loop(
@@ -273,6 +315,8 @@ pub(crate) fn verify_miller_loop_product(product: &MillerLoopResult, signature: 
         }
     };
 
+    // SAFETY: Both Miller-loop results are initialized and remain valid for
+    // this read-only comparison.
     unsafe { blst::blst_fp12_finalverify(product, &signature) }
 }
 
@@ -282,6 +326,9 @@ pub(crate) fn verify_proof(public_key: &G1Affine, proof: &G2Affine) -> bool {
     let mut message_pairing = MaybeUninit::<blst::blst_fp12>::uninit();
     let mut proof_pairing = MaybeUninit::<blst::blst_fp12>::uninit();
 
+    // SAFETY: The input points and BLST's static generator are initialized.
+    // Both Miller-loop calls initialize their outputs before finalverify reads
+    // them.
     unsafe {
         blst::blst_miller_loop(message_pairing.as_mut_ptr(), &message, public_key);
         blst::blst_miller_loop(
@@ -298,6 +345,9 @@ pub(crate) fn derive_public_key(scalar: &Scalar) -> G1Affine {
     let mut projective = MaybeUninit::<blst::blst_p1>::uninit();
     let mut affine = MaybeUninit::<G1Affine>::uninit();
 
+    // SAFETY: `scalar` is initialized and valid. BLST initializes `projective`
+    // before the conversion reads it, then initializes `affine` before Rust
+    // reads it.
     unsafe {
         blst::blst_sk_to_pk_in_g1(projective.as_mut_ptr(), scalar);
         blst::blst_p1_to_affine(affine.as_mut_ptr(), projective.as_ptr());
@@ -315,6 +365,8 @@ pub(crate) fn sign_message(scalar: &Scalar, message: &[u8]) -> G2Affine {
 pub(crate) fn sign_hashed_message(scalar: &Scalar, message: &G2Affine) -> G2Affine {
     let mut projective = MaybeUninit::<blst::blst_p2>::uninit();
 
+    // SAFETY: `message` is initialized, and BLST initializes the complete
+    // projective output before it is passed to `sign_projective`.
     unsafe {
         blst::blst_p2_from_affine(projective.as_mut_ptr(), message);
         sign_projective(scalar, &projective.assume_init())
@@ -333,6 +385,8 @@ pub(crate) fn prove_possession(scalar: &Scalar) -> G2Affine {
 fn sign_projective(scalar: &Scalar, message: &blst::blst_p2) -> G2Affine {
     let mut signature = MaybeUninit::<G2Affine>::uninit();
 
+    // SAFETY: `message` and `scalar` are initialized. BLST permits a null
+    // serialized-output pointer and initializes the affine signature output.
     unsafe {
         blst::blst_sign_pk2_in_g1(ptr::null_mut(), signature.as_mut_ptr(), message, scalar);
         signature.assume_init()
@@ -343,6 +397,8 @@ fn sign_projective(scalar: &Scalar, message: &blst::blst_p2) -> G2Affine {
 pub(crate) fn decode_scalar(bytes: &[u8; 32]) -> Option<Scalar> {
     let mut scalar = MaybeUninit::<Scalar>::uninit();
 
+    // SAFETY: `bytes` contains 32 readable bytes. BLST initializes `scalar`
+    // before it is read or passed to the validity predicate.
     unsafe {
         blst::blst_scalar_from_bendian(scalar.as_mut_ptr(), bytes.as_ptr());
         let scalar = scalar.assume_init();
@@ -354,6 +410,8 @@ pub(crate) fn decode_scalar(bytes: &[u8; 32]) -> Option<Scalar> {
 pub(crate) fn encode_scalar(scalar: &Scalar) -> [u8; 32] {
     let mut bytes = [0; 32];
 
+    // SAFETY: `scalar` is initialized, and `bytes` has the 32 writable bytes
+    // required for the big-endian encoding.
     unsafe {
         blst::blst_bendian_from_scalar(bytes.as_mut_ptr(), scalar);
     }
@@ -367,6 +425,9 @@ pub(crate) fn derive_key_material(key_material: &[u8], salt: &[u8], key_info: &[
 
     let mut scalar = MaybeUninit::<Scalar>::uninit();
 
+    // SAFETY: Each slice pointer is valid for its corresponding length, and
+    // the asserted key-material length satisfies BLST's precondition. BLST
+    // initializes `scalar` before it is read or checked.
     unsafe {
         blst::blst_keygen_v5(
             scalar.as_mut_ptr(),
@@ -390,6 +451,8 @@ pub(crate) fn derive_key_material(key_material: &[u8], salt: &[u8], key_info: &[
 pub(crate) fn derive_hierarchical_child(parent: &Scalar, index: u32) -> Scalar {
     let mut scalar = MaybeUninit::<Scalar>::uninit();
 
+    // SAFETY: `parent` is an initialized valid scalar, and BLST initializes
+    // the child scalar before it is read or checked.
     unsafe {
         blst::blst_derive_child_eip2333(scalar.as_mut_ptr(), parent, index);
         let scalar = scalar.assume_init();
@@ -404,6 +467,8 @@ pub(crate) fn derive_hierarchical_child(parent: &Scalar, index: u32) -> Scalar {
 #[cfg(feature = "signing")]
 pub(crate) fn zeroize_scalar(scalar: &mut Scalar) {
     for byte in &mut scalar.b {
+        // SAFETY: `byte` is a uniquely borrowed, valid `u8` location. The
+        // volatile write stores a valid `u8` value without crossing its bounds.
         unsafe {
             ptr::write_volatile(byte, 0);
         }
