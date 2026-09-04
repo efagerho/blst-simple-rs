@@ -1,7 +1,9 @@
 mod common;
 
-use blst_simple_rs::{HashedMessage, Signature, UnverifiedPublicKey};
-use common::{decode_hex, decode_hex_array};
+use blst_simple_rs::{Signature, UnverifiedPublicKey};
+use common::{
+    SINGLE_VERIFICATION_PATHS, decode_hex, decode_hex_array, verify_single_at_each_entry_point,
+};
 use serde::Deserialize;
 
 const VECTORS: &str = include_str!("vectors/wycheproof/bls_sig_g2_pop_verify_test.json");
@@ -69,51 +71,34 @@ fn bls_pop_signature_verification() {
 
         for test in group.tests {
             let expected = test.result == TestResult::Valid;
-            let [raw, hashed, prepared] =
-                verify_at_each_message_rung(&group.public_key.pk, &test.msg, &test.sig);
+            let results = verify_at_each_entry_point(&group.public_key.pk, &test.msg, &test.sig);
             let context = format!("test case {}: {}", test.id, test.comment);
 
-            assert_eq!(
-                raw, expected,
-                "raw-message verification failed for {context}"
-            );
-            assert_eq!(
-                hashed, expected,
-                "hashed-message verification failed for {context}"
-            );
-            assert_eq!(
-                prepared, expected,
-                "prepared-message verification failed for {context}"
-            );
+            for (path, actual) in SINGLE_VERIFICATION_PATHS.into_iter().zip(results) {
+                assert_eq!(actual, expected, "{path} failed for {context}");
+            }
         }
     }
 }
 
-fn verify_at_each_message_rung(public_key: &str, message: &str, signature: &str) -> [bool; 3] {
+fn verify_at_each_entry_point(public_key: &str, message: &str, signature: &str) -> [bool; 13] {
     let Some(public_key) = decode_hex_array(public_key) else {
-        return [false; 3];
+        return [false; 13];
     };
     let Some(message) = decode_hex(message) else {
-        return [false; 3];
+        return [false; 13];
     };
     let Some(signature) = decode_hex_array(signature) else {
-        return [false; 3];
+        return [false; 13];
     };
     let Ok(public_key) = UnverifiedPublicKey::from_bytes(&public_key) else {
-        return [false; 3];
+        return [false; 13];
     };
     let Ok(signature) = Signature::from_bytes(&signature) else {
-        return [false; 3];
+        return [false; 13];
     };
 
     // A single-signature pairing equation does not rely on proof of possession.
     let public_key = public_key.assume_proof_verified();
-    let hashed = HashedMessage::new(&message);
-    let prepared = hashed.prepare();
-
-    [
-        signature.verify_message(&public_key, &message),
-        signature.verify(&public_key, &hashed),
-        signature.verify_prepared(&public_key, &prepared),
-    ]
+    verify_single_at_each_entry_point(&public_key, &message, &signature)
 }
