@@ -255,6 +255,21 @@ mod tests {
     }
 
     #[test]
+    fn verifies_empty_message_buffers() {
+        let (first_key, first_signature) = participant(scalar(1), b"");
+        let (second_key, second_signature) = participant(scalar(2), b"");
+
+        assert!(first_signature.verify_message(&first_key, b""));
+
+        let keys = [first_key, second_key];
+        let aggregate_key = AggregatePublicKey::from_keys(&keys).unwrap();
+        let aggregate_signature = aggregate_signatures(&[first_signature, second_signature]);
+
+        assert!(aggregate_signature.verify_message(&aggregate_key, b""));
+        assert!(aggregate_signature.verify_message_with_keys(&keys, b""));
+    }
+
+    #[test]
     fn verifies_single_signatures_at_every_message_rung() {
         let (key, signature) = participant(scalar(1), b"message");
         let (other_key, _) = participant(scalar(2), b"message");

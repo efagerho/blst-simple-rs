@@ -195,21 +195,25 @@ mod tests {
 
     #[test]
     fn rejects_short_key_material() {
-        let key_material = [7; 31];
-        let expected = KeyMaterialTooShortError {
-            supplied: 31,
-            minimum: 32,
-        };
+        let empty = [];
+        let short = [7; 31];
 
-        assert_eq!(
-            SecretKey::from_key_material(&key_material).unwrap_err(),
-            expected
-        );
-        assert_eq!(
-            keygen::derive(&key_material, keygen::Parameters::new(b"salt")).unwrap_err(),
-            expected
-        );
-        assert_eq!(hierarchical::master(&key_material).unwrap_err(), expected);
+        for key_material in [&empty[..], &short[..]] {
+            let expected = KeyMaterialTooShortError {
+                supplied: key_material.len(),
+                minimum: 32,
+            };
+
+            assert_eq!(
+                SecretKey::from_key_material(key_material).unwrap_err(),
+                expected
+            );
+            assert_eq!(
+                keygen::derive(key_material, keygen::Parameters::new(b"salt")).unwrap_err(),
+                expected
+            );
+            assert_eq!(hierarchical::master(key_material).unwrap_err(), expected);
+        }
     }
 
     #[test]
