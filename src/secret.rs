@@ -176,7 +176,7 @@ mod tests {
 
     use super::{KeyMaterialTooShortError, SecretKey, SecretKeyError};
     use crate::suite::{PROOF_OF_POSSESSION_DST, SIGNATURE_DST};
-    use crate::{HashedMessage, ProofOfPossession, hierarchical, keygen};
+    use crate::{HashedMessage, hierarchical, keygen};
 
     fn hex_bytes(input: &str) -> Vec<u8> {
         fn nibble(byte: u8) -> u8 {
@@ -383,17 +383,17 @@ mod tests {
     fn matches_chia_pop_known_answer_vector() {
         let scalar = hex("258787ef728c898e43bc76244d70f468c9c7e1338a107b18b42da0d86b663c26");
         let secret_key = SecretKey::from_bytes(&scalar).unwrap();
-        let expected = hex(concat!(
+        let expected: [u8; 96] = hex(concat!(
             "84f709159435f0dc73b3e8bf6c78d85282d19231555a8ee3b6e2573aaf66872d92",
             "03fefa1ef",
             "700e34e7c3f3fb28210100558c6871c53f1ef6055b9f06b0d1abe22ad584ad3b95",
             "7f3018a8f5",
             "8227c6c716b1e15791459850f2289168fa0cf9115",
         ));
-        let proof = ProofOfPossession::from_bytes(&expected).unwrap();
+        let proof = secret_key.prove_possession();
         let public_key = secret_key.public_key();
 
-        assert_eq!(secret_key.prove_possession(), proof);
+        assert_eq!(proof.to_bytes(), expected);
         assert_eq!(
             public_key.as_unverified().verify_proof(&proof),
             Ok(public_key)
