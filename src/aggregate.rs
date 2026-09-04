@@ -26,7 +26,7 @@ impl AggregateSignature {
 
 impl Hash for AggregateSignature {
     fn hash<H: Hasher>(&self, state: &mut H) {
-        hash_g2(&self.point, state);
+        ffi::hash_g2(&self.point, state);
     }
 }
 
@@ -134,7 +134,7 @@ impl AggregatePublicKey {
 
 impl Hash for AggregatePublicKey {
     fn hash<H: Hasher>(&self, state: &mut H) {
-        hash_g1(&self.point, state);
+        ffi::hash_g1(&self.point, state);
     }
 }
 
@@ -217,20 +217,6 @@ impl fmt::Debug for AggregatePublicKeyBuilder {
     fn fmt(&self, f: &mut fmt::Formatter<'_>) -> fmt::Result {
         f.debug_struct("AggregatePublicKeyBuilder")
             .finish_non_exhaustive()
-    }
-}
-
-fn hash_g1<H: Hasher>(point: &G1Affine, state: &mut H) {
-    for coordinate in [&point.x, &point.y] {
-        coordinate.l.hash(state);
-    }
-}
-
-fn hash_g2<H: Hasher>(point: &G2Affine, state: &mut H) {
-    for coordinate in [&point.x, &point.y] {
-        for component in &coordinate.fp {
-            component.l.hash(state);
-        }
     }
 }
 
