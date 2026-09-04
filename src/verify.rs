@@ -1,11 +1,12 @@
 use core::fmt;
-use std::collections::HashMap;
+use std::collections::{HashMap, hash_map::Entry};
 
 use crate::ffi::{
     self, G1Affine, G1Projective, G2Affine, MILLER_LOOP_BATCH_SIZE, MillerLoopResult, PreparedLines,
 };
 use crate::{
     AggregatePublicKey, AggregateSignature, HashedMessage, PreparedMessage, PublicKey, Signature,
+    TooManyDistinctMessagesError,
 };
 
 impl Signature {
@@ -226,96 +227,164 @@ impl PairingAccumulator {
 /// A reusable streaming aggregate verifier.
 ///
 /// Pairing work is accumulated as groups arrive. Public keys for equal hashed
-/// messages are also accumulated so their final sum can be validated.
+/// messages are also accumulated so their final sum can be validated. The
+/// caller-selected distinct-message limit bounds the retained grouping state.
+/// Repeated messages do not consume additional slots.
 /// [`finish_and_reset`](Self::finish_and_reset) clears the groups while
 /// retaining the hash table's allocation for reuse.
 pub struct AggregateVerifier {
     pairings: PairingAccumulator,
     grouped_keys: HashMap<[u8; 96], G1Projective>,
+    maximum_distinct_messages: usize,
+    overflowed: bool,
 }
 
 impl AggregateVerifier {
-    /// Creates a verifier without preallocating message groups.
+    /// Creates a verifier with a hard distinct-message limit and no initial
+    /// allocation.
+    ///
+    /// The hash table grows as messages arrive, up to
+    /// `maximum_distinct_messages`. A maximum of zero rejects every group.
     #[must_use]
-    pub fn new() -> Self {
-        Self::with_capacity(0)
+    pub fn new(maximum_distinct_messages: usize) -> Self {
+        Self::with_initial_capacity(maximum_distinct_messages, 0)
     }
 
-    /// Creates a verifier preallocated for at least `distinct_messages`
-    /// distinct hashed messages.
+    /// Creates a verifier with a hard distinct-message limit and an allocation
+    /// sized for the expected number of distinct messages.
     ///
-    /// The capacity is not a limit. The table grows if more distinct messages
-    /// are added.
+    /// `initial_capacity` is capped at `maximum_distinct_messages`. The table
+    /// grows as needed until the maximum is reached.
     #[must_use]
-    pub fn with_capacity(distinct_messages: usize) -> Self {
+    pub fn with_initial_capacity(
+        maximum_distinct_messages: usize,
+        initial_capacity: usize,
+    ) -> Self {
+        let initial_capacity = initial_capacity.min(maximum_distinct_messages);
         Self {
             pairings: PairingAccumulator::new(),
-            grouped_keys: HashMap::with_capacity(distinct_messages),
+            grouped_keys: HashMap::with_capacity(initial_capacity),
+            maximum_distinct_messages,
+            overflowed: false,
         }
     }
 
     /// Adds one aggregate-key/hashed-message group.
-    pub fn add(&mut self, key: &AggregatePublicKey, message: &HashedMessage) {
-        self.record_group(key, message);
+    ///
+    /// An excess distinct message poisons the current verification. Further
+    /// additions do no pairing work and return the same error until
+    /// [`Self::finish_and_reset`] is called.
+    pub fn add(
+        &mut self,
+        key: &AggregatePublicKey,
+        message: &HashedMessage,
+    ) -> Result<(), TooManyDistinctMessagesError> {
+        self.try_accumulate_key_for_message(key, message)?;
         self.pairings.add(&key.point, &message.point);
+        Ok(())
     }
 
     /// Adds one aggregate-key/prepared-message group.
-    pub fn add_prepared(&mut self, key: &AggregatePublicKey, message: &PreparedMessage) {
-        self.record_group(key, message.as_hashed_message());
+    ///
+    /// An excess distinct message poisons the current verification. Further
+    /// additions do no pairing work and return the same error until
+    /// [`Self::finish_and_reset`] is called.
+    pub fn add_prepared(
+        &mut self,
+        key: &AggregatePublicKey,
+        message: &PreparedMessage,
+    ) -> Result<(), TooManyDistinctMessagesError> {
+        self.try_accumulate_key_for_message(key, message.as_hashed_message())?;
         self.pairings.add_prepared(&key.point, &message.lines);
+        Ok(())
     }
 
     /// Adds aggregate-key/hashed-message groups in slice order.
-    pub fn extend(&mut self, groups: &[(&AggregatePublicKey, &HashedMessage)]) {
+    ///
+    /// An excess distinct message poisons the current verification after the
+    /// preceding groups have been added.
+    pub fn extend(
+        &mut self,
+        groups: &[(&AggregatePublicKey, &HashedMessage)],
+    ) -> Result<(), TooManyDistinctMessagesError> {
         for &(key, message) in groups {
-            self.add(key, message);
+            self.add(key, message)?;
         }
+        Ok(())
     }
 
     /// Adds aggregate-key/prepared-message groups in slice order.
-    pub fn extend_prepared(&mut self, groups: &[(&AggregatePublicKey, &PreparedMessage)]) {
+    ///
+    /// An excess distinct message poisons the current verification after the
+    /// preceding groups have been added.
+    pub fn extend_prepared(
+        &mut self,
+        groups: &[(&AggregatePublicKey, &PreparedMessage)],
+    ) -> Result<(), TooManyDistinctMessagesError> {
         for &(key, message) in groups {
-            self.add_prepared(key, message);
+            self.add_prepared(key, message)?;
         }
+        Ok(())
     }
 
     /// Decides the pairing equation and resets the verifier for reuse.
     ///
-    /// The hash table retains its capacity. Returns `false` if no groups were
+    /// The hash table retains its capacity. Returns `false` if the current
+    /// verification exceeded its distinct-message limit, no groups were
     /// added, any equal-message public-key sum is the identity, or the pairing
     /// equation fails.
     #[must_use]
     pub fn finish_and_reset(&mut self, signature: &AggregateSignature) -> bool {
-        let valid = if self.grouped_keys.is_empty()
-            || self.grouped_keys.values().any(ffi::g1_is_identity)
-        {
-            false
-        } else {
-            self.pairings.verify(&signature.point)
-        };
+        let valid = !self.overflowed
+            && !self.grouped_keys.is_empty()
+            && !self.grouped_keys.values().any(ffi::g1_is_identity)
+            && self.pairings.verify(&signature.point);
 
         self.reset();
         valid
     }
 
-    fn record_group(&mut self, key: &AggregatePublicKey, message: &HashedMessage) {
-        let message = ffi::compress_g2(&message.point);
-        self.grouped_keys
-            .entry(message)
-            .and_modify(|sum| ffi::add_g1_affine(sum, &key.point))
-            .or_insert_with(|| ffi::g1_from_affine(&key.point));
-    }
-
     fn reset(&mut self) {
         self.pairings.reset();
         self.grouped_keys.clear();
+        self.overflowed = false;
     }
-}
 
-impl Default for AggregateVerifier {
-    fn default() -> Self {
-        Self::new()
+    fn try_accumulate_key_for_message(
+        &mut self,
+        key: &AggregatePublicKey,
+        message: &HashedMessage,
+    ) -> Result<(), TooManyDistinctMessagesError> {
+        if self.overflowed {
+            return Err(self.limit_error());
+        }
+
+        let message = ffi::compress_g2(&message.point);
+        let at_limit = self.grouped_keys.len() >= self.maximum_distinct_messages;
+        let limit_error = TooManyDistinctMessagesError {
+            maximum: self.maximum_distinct_messages,
+        };
+
+        match self.grouped_keys.entry(message) {
+            Entry::Occupied(mut entry) => {
+                ffi::add_g1_affine(entry.get_mut(), &key.point);
+                Ok(())
+            }
+            Entry::Vacant(_) if at_limit => {
+                self.overflowed = true;
+                Err(limit_error)
+            }
+            Entry::Vacant(entry) => {
+                entry.insert(ffi::g1_from_affine(&key.point));
+                Ok(())
+            }
+        }
+    }
+
+    fn limit_error(&self) -> TooManyDistinctMessagesError {
+        TooManyDistinctMessagesError {
+            maximum: self.maximum_distinct_messages,
+        }
     }
 }
 
@@ -337,7 +406,7 @@ mod tests {
     use crate::suite::{PROOF_OF_POSSESSION_DST, SIGNATURE_DST};
     use crate::{
         AggregatePublicKey, AggregateSignature, AggregateSignatureBuilder, HashedMessage,
-        PublicKey, Signature,
+        PublicKey, Signature, TooManyDistinctMessagesError,
     };
 
     fn scalar(value: u8) -> [u8; 32] {
@@ -519,18 +588,20 @@ mod tests {
         assert!(!signature.verify_groups(&[]));
         assert!(!signature.verify_prepared_groups(&[]));
 
-        let mut verifier = AggregateVerifier::new();
-        verifier.add(&keys[0], &messages[0]);
-        verifier.add_prepared(&keys[1], &prepared[1]);
-        verifier.extend(&[(&keys[2], &messages[2])]);
+        let mut verifier = AggregateVerifier::new(2);
+        verifier.add(&keys[0], &messages[0]).unwrap();
+        verifier.add_prepared(&keys[1], &prepared[1]).unwrap();
+        verifier.extend(&[(&keys[2], &messages[2])]).unwrap();
         assert!(verifier.finish_and_reset(&signature));
 
-        let mut verifier = AggregateVerifier::new();
-        verifier.extend_prepared(&[
-            (&keys[0], &prepared[0]),
-            (&keys[1], &prepared[1]),
-            (&keys[2], &prepared[2]),
-        ]);
+        let mut verifier = AggregateVerifier::new(2);
+        verifier
+            .extend_prepared(&[
+                (&keys[0], &prepared[0]),
+                (&keys[1], &prepared[1]),
+                (&keys[2], &prepared[2]),
+            ])
+            .unwrap();
         assert!(verifier.finish_and_reset(&signature));
     }
 
@@ -549,7 +620,7 @@ mod tests {
         }
 
         let groups: Vec<_> = keys.iter().zip(&messages).collect();
-        let mut verifier = AggregateVerifier::with_capacity(1);
+        let mut verifier = AggregateVerifier::with_initial_capacity(messages.len(), 1);
 
         for count in [
             1,
@@ -563,7 +634,7 @@ mod tests {
 
             assert!(signature.verify_groups(&groups[..count]));
 
-            verifier.extend(&groups[..count]);
+            verifier.extend(&groups[..count]).unwrap();
             assert!(verifier.finish_and_reset(&signature));
         }
 
@@ -606,10 +677,10 @@ mod tests {
         let inverse_key = AggregatePublicKey::from(inverse_key);
         let message = HashedMessage::new(message);
         let prepared = message.prepare();
-        let mut verifier = AggregateVerifier::new();
+        let mut verifier = AggregateVerifier::new(1);
 
-        verifier.add(&first_key, &message);
-        verifier.add_prepared(&inverse_key, &prepared);
+        verifier.add(&first_key, &message).unwrap();
+        verifier.add_prepared(&inverse_key, &prepared).unwrap();
 
         assert!(!verifier.finish_and_reset(&signature));
         assert!(!verifier.finish_and_reset(&signature));
@@ -640,7 +711,7 @@ mod tests {
             messages[1].prepare(),
             messages[2].prepare(),
         ];
-        let mut verifier = AggregateVerifier::new();
+        let mut verifier = AggregateVerifier::new(2);
 
         assert!(!signature.verify_groups(&[
             (&keys[0], &messages[0]),
@@ -653,11 +724,13 @@ mod tests {
             (&keys[2], &prepared[2]),
         ]));
 
-        verifier.extend(&[
-            (&keys[0], &messages[0]),
-            (&keys[1], &messages[1]),
-            (&keys[2], &messages[2]),
-        ]);
+        verifier
+            .extend(&[
+                (&keys[0], &messages[0]),
+                (&keys[1], &messages[1]),
+                (&keys[2], &messages[2]),
+            ])
+            .unwrap();
 
         assert!(!verifier.finish_and_reset(&signature));
     }
@@ -679,7 +752,7 @@ mod tests {
         ];
         let message = HashedMessage::new(message_bytes);
         let prepared = message.prepare();
-        let mut verifier = AggregateVerifier::new();
+        let mut verifier = AggregateVerifier::new(1);
 
         assert!(signature.verify_groups(&[
             (&keys[0], &message),
@@ -692,9 +765,9 @@ mod tests {
             (&keys[2], &prepared),
         ]));
 
-        verifier.add(&keys[0], &message);
-        verifier.add(&keys[1], &message);
-        verifier.add_prepared(&keys[2], &prepared);
+        verifier.add(&keys[0], &message).unwrap();
+        verifier.add(&keys[1], &message).unwrap();
+        verifier.add_prepared(&keys[2], &prepared).unwrap();
 
         assert!(verifier.finish_and_reset(&signature));
     }
@@ -708,42 +781,177 @@ mod tests {
         let wrong_signature = AggregateSignature::from(wrong_signature);
         let message = HashedMessage::new(b"message");
         let prepared = message.prepare();
-        let mut verifier = AggregateVerifier::with_capacity(4);
+        let mut verifier = AggregateVerifier::with_initial_capacity(4, 4);
         let capacity = verifier.grouped_keys.capacity();
 
         assert!(capacity >= 4);
 
-        verifier.add(&key, &message);
+        verifier.add(&key, &message).unwrap();
         assert!(!verifier.finish_and_reset(&wrong_signature));
         assert_eq!(verifier.grouped_keys.capacity(), capacity);
         assert!(verifier.grouped_keys.is_empty());
         assert_eq!(verifier.pairings.staged, 0);
 
-        verifier.add_prepared(&key, &prepared);
+        verifier.add_prepared(&key, &prepared).unwrap();
         assert!(verifier.finish_and_reset(&signature));
         assert_eq!(verifier.grouped_keys.capacity(), capacity);
 
         assert!(!verifier.finish_and_reset(&signature));
         assert_eq!(verifier.grouped_keys.capacity(), capacity);
 
-        verifier.add(&key, &message);
+        verifier.add(&key, &message).unwrap();
         assert!(verifier.finish_and_reset(&signature));
     }
 
     #[test]
-    fn default_streaming_verifier_matches_new() {
+    fn verifier_capacity_grows_lazily_and_is_retained() {
+        let (key, signature) = participant(scalar(1), b"message");
+        let key = AggregatePublicKey::from(key);
+        let signature = AggregateSignature::from(signature);
+        let messages = [
+            HashedMessage::new(b"one"),
+            HashedMessage::new(b"two"),
+            HashedMessage::new(b"three"),
+            HashedMessage::new(b"four"),
+        ];
+        let mut verifier = AggregateVerifier::new(messages.len());
+
+        assert_eq!(verifier.grouped_keys.capacity(), 0);
+
+        for message in &messages {
+            verifier.add(&key, message).unwrap();
+        }
+        let grown_capacity = verifier.grouped_keys.capacity();
+
+        assert!(grown_capacity >= messages.len());
+
+        assert!(!verifier.finish_and_reset(&signature));
+        assert_eq!(verifier.grouped_keys.capacity(), grown_capacity);
+    }
+
+    #[test]
+    fn initial_capacity_is_capped_at_the_distinct_message_limit() {
+        let verifier = AggregateVerifier::with_initial_capacity(0, usize::MAX);
+
+        assert_eq!(verifier.maximum_distinct_messages, 0);
+        assert_eq!(verifier.grouped_keys.capacity(), 0);
+    }
+
+    #[test]
+    fn repeated_messages_are_accepted_at_the_limit() {
+        let (key, signature) = participant(scalar(1), b"message");
+        let key = AggregatePublicKey::from(key);
+        let signature = aggregate_signatures(&[signature, signature]);
+        let message = HashedMessage::new(b"message");
+        let prepared = message.prepare();
+        let mut verifier = AggregateVerifier::new(1);
+
+        verifier.add(&key, &message).unwrap();
+        verifier.add_prepared(&key, &prepared).unwrap();
+
+        assert_eq!(verifier.grouped_keys.len(), 1);
+        assert!(verifier.finish_and_reset(&signature));
+    }
+
+    #[test]
+    fn an_excess_distinct_message_poisons_until_finish_and_reset() {
+        let (key, signature) = participant(scalar(1), b"first");
+        let key = AggregatePublicKey::from(key);
+        let signature = AggregateSignature::from(signature);
+        let first = HashedMessage::new(b"first");
+        let second = HashedMessage::new(b"second");
+        let error = TooManyDistinctMessagesError { maximum: 1 };
+        let mut verifier = AggregateVerifier::new(1);
+
+        verifier.add(&key, &first).unwrap();
+        let staged = verifier.pairings.staged;
+        let capacity = verifier.grouped_keys.capacity();
+
+        assert_eq!(verifier.add(&key, &second), Err(error));
+        assert_eq!(verifier.add(&key, &first), Err(error));
+        assert_eq!(verifier.grouped_keys.len(), 1);
+        assert_eq!(verifier.grouped_keys.capacity(), capacity);
+        assert_eq!(verifier.pairings.staged, staged);
+        assert!(!verifier.finish_and_reset(&signature));
+        assert!(verifier.grouped_keys.is_empty());
+        assert_eq!(verifier.grouped_keys.capacity(), capacity);
+        assert!(!verifier.overflowed);
+
+        verifier.add(&key, &first).unwrap();
+        assert!(verifier.finish_and_reset(&signature));
+    }
+
+    #[test]
+    fn bulk_addition_reports_distinct_message_overflow() {
+        let (key, signature) = participant(scalar(1), b"first");
+        let key = AggregatePublicKey::from(key);
+        let signature = AggregateSignature::from(signature);
+        let first = HashedMessage::new(b"first");
+        let second = HashedMessage::new(b"second");
+        let first_prepared = first.prepare();
+        let second_prepared = second.prepare();
+        let error = TooManyDistinctMessagesError { maximum: 1 };
+        let mut verifier = AggregateVerifier::new(1);
+
+        assert_eq!(
+            verifier.extend(&[(&key, &first), (&key, &second)]),
+            Err(error)
+        );
+        assert!(!verifier.finish_and_reset(&signature));
+
+        assert_eq!(
+            verifier.extend_prepared(&[(&key, &first_prepared), (&key, &second_prepared),]),
+            Err(error)
+        );
+        assert!(!verifier.finish_and_reset(&signature));
+    }
+
+    #[test]
+    fn zero_limit_rejects_the_first_message() {
         let (key, signature) = participant(scalar(1), b"message");
         let key = AggregatePublicKey::from(key);
         let signature = AggregateSignature::from(signature);
         let message = HashedMessage::new(b"message");
-        let mut new = AggregateVerifier::new();
-        let mut default = AggregateVerifier::default();
+        let error = TooManyDistinctMessagesError { maximum: 0 };
+        let mut verifier = AggregateVerifier::new(0);
 
-        new.add(&key, &message);
-        default.add(&key, &message);
+        assert_eq!(verifier.add(&key, &message), Err(error));
+        assert!(!verifier.finish_and_reset(&signature));
+    }
 
-        assert!(new.finish_and_reset(&signature));
-        assert!(default.finish_and_reset(&signature));
+    #[test]
+    fn overflow_after_a_pairing_flush_fails_closed() {
+        let (key, signature) = participant(scalar(1), b"message");
+        let key = AggregatePublicKey::from(key);
+        let signature = AggregateSignature::from(signature);
+        let error = TooManyDistinctMessagesError {
+            maximum: MILLER_LOOP_BATCH_SIZE,
+        };
+        let mut verifier = AggregateVerifier::new(MILLER_LOOP_BATCH_SIZE);
+
+        for value in 0..MILLER_LOOP_BATCH_SIZE {
+            verifier
+                .add(&key, &HashedMessage::new(&value.to_le_bytes()))
+                .unwrap();
+        }
+
+        assert_eq!(verifier.pairings.staged, 0);
+        assert_eq!(
+            verifier.add(&key, &HashedMessage::new(b"excess")),
+            Err(error)
+        );
+        assert!(!verifier.finish_and_reset(&signature));
+    }
+
+    #[test]
+    fn empty_bulk_additions_leave_the_verifier_empty() {
+        let (_, signature) = participant(scalar(1), b"message");
+        let signature = AggregateSignature::from(signature);
+        let mut verifier = AggregateVerifier::new(1);
+
+        assert_eq!(verifier.extend(&[]), Ok(()));
+        assert_eq!(verifier.extend_prepared(&[]), Ok(()));
+        assert!(!verifier.finish_and_reset(&signature));
     }
 
     #[test]
@@ -758,9 +966,11 @@ mod tests {
         let first_key = AggregatePublicKey::from(first_key);
         let inverse_key = AggregatePublicKey::from(inverse_key);
         let prepared = HashedMessage::new(message).prepare();
-        let mut verifier = AggregateVerifier::new();
+        let mut verifier = AggregateVerifier::new(1);
 
-        verifier.extend_prepared(&[(&first_key, &prepared), (&inverse_key, &prepared)]);
+        verifier
+            .extend_prepared(&[(&first_key, &prepared), (&inverse_key, &prepared)])
+            .unwrap();
 
         assert!(!verifier.finish_and_reset(&signature));
     }
@@ -771,12 +981,14 @@ mod tests {
         let key = AggregatePublicKey::from(key);
         let signature = AggregateSignature::from(signature);
         let message = HashedMessage::new(b"message");
-        let mut verifier = AggregateVerifier::new();
+        let mut verifier = AggregateVerifier::new(1);
 
-        verifier.add(&key, &HashedMessage::new(b"wrong message"));
+        verifier
+            .add(&key, &HashedMessage::new(b"wrong message"))
+            .unwrap();
         assert!(!verifier.finish_and_reset(&signature));
 
-        verifier.add(&key, &message);
+        verifier.add(&key, &message).unwrap();
         assert!(verifier.finish_and_reset(&signature));
     }
 
@@ -800,7 +1012,7 @@ mod tests {
 
     #[test]
     fn verifier_debug_omits_pairing_staging_and_grouping_state() {
-        let debug = format!("{:?}", AggregateVerifier::new());
+        let debug = format!("{:?}", AggregateVerifier::new(1));
 
         assert_eq!(debug, "AggregateVerifier { .. }");
     }
