@@ -4,18 +4,17 @@ mod common;
 use blst_simple_rs::SecretKey;
 #[cfg(blst_simple_dangerous)]
 use blst_simple_rs::{
-    AggregatePublicKey, AggregateVerifier, HashedMessage, PublicKey, Signature,
-    UnverifiedPublicKey, dangerous::assume_proof_verified,
+    AggregatePublicKey, AggregateVerifier, HashedMessage, PublicKey,
+    dangerous::assume_proof_verified,
 };
-use blst_simple_rs::{AggregateSignature, AggregateSignatureBuilder};
-#[cfg(any(feature = "signing", blst_simple_dangerous))]
+use blst_simple_rs::{
+    AggregateSignature, AggregateSignatureBuilder, Signature, UnverifiedPublicKey,
+};
 use common::decode_hex;
 use common::decode_hex_array;
 #[cfg(blst_simple_dangerous)]
-use common::{
-    SINGLE_VERIFICATION_PATHS, verify_fast_aggregate_at_each_entry_point,
-    verify_single_at_each_entry_point,
-};
+use common::{FAST_AGGREGATE_VERIFICATION_PATHS, verify_fast_aggregate_at_each_entry_point};
+use common::{SINGLE_VERIFICATION_PATHS, verify_single_at_each_entry_point};
 use serde::Deserialize;
 use serde::de::DeserializeOwned;
 
@@ -89,7 +88,6 @@ const FAST_AGGREGATE_VERIFY_FIXTURES: &[Fixture] = fixtures!("fast_aggregate_ver
     "fast_aggregate_verify_valid_652ce62f09290811",
 );
 
-#[cfg(blst_simple_dangerous)]
 const VERIFY_FIXTURES: &[Fixture] = fixtures!("verify";
     "verify_infinity_pubkey_and_infinity_signature",
     "verify_tampered_signature_case_195246ee3bd3b6ec",
@@ -151,7 +149,6 @@ struct FastAggregateVerifyInput {
     signature: String,
 }
 
-#[cfg(blst_simple_dangerous)]
 #[derive(Deserialize)]
 struct VerifyInput {
     pubkey: String,
@@ -217,13 +214,12 @@ fn fast_aggregate_verification() {
         let test: TestCase<FastAggregateVerifyInput, bool> = parse(fixture);
         let results = fast_aggregate_verify_at_each_entry_point(&test.input);
 
-        for (path, actual) in SINGLE_VERIFICATION_PATHS[3..].iter().copied().zip(results) {
+        for (path, actual) in FAST_AGGREGATE_VERIFICATION_PATHS.into_iter().zip(results) {
             assert_eq!(actual, test.output, "{path}: {}", fixture.name);
         }
     }
 }
 
-#[cfg(blst_simple_dangerous)]
 #[test]
 fn verification() {
     for fixture in VERIFY_FIXTURES {
@@ -327,18 +323,17 @@ fn fast_aggregate_verify_at_each_entry_point(input: &FastAggregateVerifyInput) -
     verify_fast_aggregate_at_each_entry_point(&keys, &message, &signature)
 }
 
-#[cfg(blst_simple_dangerous)]
-fn verify_at_each_entry_point(input: &VerifyInput) -> [bool; 13] {
-    let Some(public_key) = decode_public_key(&input.pubkey) else {
-        return [false; 13];
+fn verify_at_each_entry_point(input: &VerifyInput) -> [bool; 3] {
+    let Some(public_key) = decode_unverified_public_key(&input.pubkey) else {
+        return [false; 3];
     };
     let Some(signature) =
         decode_hex_array(&input.signature).and_then(|bytes| Signature::from_bytes(&bytes).ok())
     else {
-        return [false; 13];
+        return [false; 3];
     };
     let Some(message) = decode_hex(&input.message) else {
-        return [false; 13];
+        return [false; 3];
     };
     verify_single_at_each_entry_point(&public_key, &message, &signature)
 }
@@ -359,11 +354,15 @@ fn decode_public_keys(inputs: &[String]) -> Option<Vec<PublicKey>> {
 
 #[cfg(blst_simple_dangerous)]
 fn decode_public_key(input: &str) -> Option<PublicKey> {
-    let bytes = decode_hex_array(input)?;
-    let key = UnverifiedPublicKey::from_bytes(&bytes).ok()?;
+    let key = decode_unverified_public_key(input)?;
 
-    // The fixtures omit proofs and supply expected pairing results.
+    // The aggregate fixtures omit proofs and supply expected pairing results.
     Some(assume_proof_verified(key))
+}
+
+fn decode_unverified_public_key(input: &str) -> Option<UnverifiedPublicKey> {
+    let bytes = decode_hex_array(input)?;
+    UnverifiedPublicKey::from_bytes(&bytes).ok()
 }
 
 fn parse<T: DeserializeOwned>(fixture: &Fixture) -> T {

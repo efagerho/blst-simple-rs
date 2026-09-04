@@ -1,13 +1,16 @@
 #[cfg(blst_simple_dangerous)]
-use blst_simple_rs::{
-    AggregatePublicKey, AggregateSignature, AggregateVerifier, HashedMessage, PublicKey, Signature,
-};
+use blst_simple_rs::{AggregatePublicKey, AggregateSignature, AggregateVerifier, PublicKey};
+use blst_simple_rs::{HashedMessage, Signature, UnverifiedPublicKey};
 
-#[cfg(blst_simple_dangerous)]
-pub const SINGLE_VERIFICATION_PATHS: [&str; 13] = [
+pub const SINGLE_VERIFICATION_PATHS: [&str; 3] = [
     "raw-message signature",
     "hashed-message signature",
     "prepared-message signature",
+];
+
+#[cfg(blst_simple_dangerous)]
+#[allow(dead_code)]
+pub const FAST_AGGREGATE_VERIFICATION_PATHS: [&str; 10] = [
     "raw message with keys",
     "hashed message with keys",
     "prepared message with keys",
@@ -24,35 +27,23 @@ pub fn decode_hex_array<const N: usize>(input: &str) -> Option<[u8; N]> {
     decode_hex(input)?.try_into().ok()
 }
 
-#[cfg(blst_simple_dangerous)]
 pub fn verify_single_at_each_entry_point(
-    key: &PublicKey,
+    key: &UnverifiedPublicKey,
     message: &[u8],
     signature: &Signature,
-) -> [bool; 13] {
+) -> [bool; 3] {
     let hashed = HashedMessage::new(message);
     let prepared = hashed.prepare();
-    let aggregate = AggregateSignature::from(signature);
-    let aggregate_results = verify_fast_aggregate_at_each_entry_point(&[*key], message, &aggregate);
 
     [
         signature.verify_message(key, message),
         signature.verify(key, &hashed),
         signature.verify_prepared(key, &prepared),
-        aggregate_results[0],
-        aggregate_results[1],
-        aggregate_results[2],
-        aggregate_results[3],
-        aggregate_results[4],
-        aggregate_results[5],
-        aggregate_results[6],
-        aggregate_results[7],
-        aggregate_results[8],
-        aggregate_results[9],
     ]
 }
 
 #[cfg(blst_simple_dangerous)]
+#[allow(dead_code)]
 pub fn verify_fast_aggregate_at_each_entry_point(
     keys: &[PublicKey],
     message: &[u8],

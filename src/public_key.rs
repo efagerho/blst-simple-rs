@@ -44,6 +44,14 @@ pub struct PublicKey {
     pub(crate) unverified: UnverifiedPublicKey,
 }
 
+impl core::ops::Deref for PublicKey {
+    type Target = UnverifiedPublicKey;
+
+    fn deref(&self) -> &Self::Target {
+        &self.unverified
+    }
+}
+
 impl PublicKey {
     #[cfg(feature = "signing")]
     pub(crate) fn from_secret(point: G1Affine) -> Self {
