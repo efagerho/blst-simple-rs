@@ -148,10 +148,8 @@ impl fmt::Display for KeyMaterialTooShortError {
     }
 }
 
-#[cfg(feature = "std")]
 impl core::error::Error for SecretKeyError {}
 
-#[cfg(feature = "std")]
 impl core::error::Error for KeyMaterialTooShortError {}
 
 pub(crate) fn validate_key_material_length(bytes: &[u8]) -> Result<(), KeyMaterialTooShortError> {
