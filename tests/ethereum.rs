@@ -10,6 +10,11 @@ use blst_simple_rs::{AggregateSignature, AggregateSignatureBuilder};
 #[cfg(any(feature = "signing", feature = "dangerous-proof-bypass"))]
 use common::decode_hex;
 use common::decode_hex_array;
+#[cfg(feature = "dangerous-proof-bypass")]
+use common::{
+    SINGLE_VERIFICATION_PATHS, verify_fast_aggregate_at_each_entry_point,
+    verify_single_at_each_entry_point,
+};
 use serde::Deserialize;
 use serde::de::DeserializeOwned;
 
@@ -209,19 +214,9 @@ fn aggregate_verification() {
 fn fast_aggregate_verification() {
     for fixture in FAST_AGGREGATE_VERIFY_FIXTURES {
         let test: TestCase<FastAggregateVerifyInput, bool> = parse(fixture);
-        let results = fast_aggregate_verify_at_each_message_rung(&test.input);
+        let results = fast_aggregate_verify_at_each_entry_point(&test.input);
 
-        for (path, actual) in [
-            "raw message with keys",
-            "hashed message with keys",
-            "prepared message with keys",
-            "raw message with aggregate key",
-            "hashed message with aggregate key",
-            "prepared message with aggregate key",
-        ]
-        .into_iter()
-        .zip(results)
-        {
+        for (path, actual) in SINGLE_VERIFICATION_PATHS[3..].iter().copied().zip(results) {
             assert_eq!(actual, test.output, "{path}: {}", fixture.name);
         }
     }
@@ -232,12 +227,9 @@ fn fast_aggregate_verification() {
 fn verification() {
     for fixture in VERIFY_FIXTURES {
         let test: TestCase<VerifyInput, bool> = parse(fixture);
-        let results = verify_at_each_message_rung(&test.input);
+        let results = verify_at_each_entry_point(&test.input);
 
-        for (path, actual) in ["raw message", "hashed message", "prepared message"]
-            .into_iter()
-            .zip(results)
-        {
+        for (path, actual) in SINGLE_VERIFICATION_PATHS.into_iter().zip(results) {
             assert_eq!(actual, test.output, "{path}: {}", fixture.name);
         }
     }
@@ -321,66 +313,33 @@ fn aggregate_verify_at_each_message_rung(input: &AggregateVerifyInput) -> [bool;
 }
 
 #[cfg(feature = "dangerous-proof-bypass")]
-fn fast_aggregate_verify_at_each_message_rung(input: &FastAggregateVerifyInput) -> [bool; 6] {
+fn fast_aggregate_verify_at_each_entry_point(input: &FastAggregateVerifyInput) -> [bool; 10] {
     let Some(signature) = decode_aggregate_signature(&input.signature) else {
-        return [false; 6];
+        return [false; 10];
     };
     let Some(keys) = decode_public_keys(&input.pubkeys) else {
-        return [false; 6];
+        return [false; 10];
     };
     let Some(message) = decode_hex(&input.message) else {
-        return [false; 6];
+        return [false; 10];
     };
-    let hashed = HashedMessage::new(&message);
-    let prepared = hashed.prepare();
-
-    let with_keys = [
-        signature.verify_message_with_keys(&keys, &message),
-        signature.verify_with_keys(&keys, &hashed),
-        signature.verify_prepared_with_keys(&keys, &prepared),
-    ];
-    let Ok(key) = AggregatePublicKey::from_keys(&keys) else {
-        return [
-            with_keys[0],
-            with_keys[1],
-            with_keys[2],
-            false,
-            false,
-            false,
-        ];
-    };
-
-    [
-        with_keys[0],
-        with_keys[1],
-        with_keys[2],
-        signature.verify_message(&key, &message),
-        signature.verify(&key, &hashed),
-        signature.verify_prepared(&key, &prepared),
-    ]
+    verify_fast_aggregate_at_each_entry_point(&keys, &message, &signature)
 }
 
 #[cfg(feature = "dangerous-proof-bypass")]
-fn verify_at_each_message_rung(input: &VerifyInput) -> [bool; 3] {
+fn verify_at_each_entry_point(input: &VerifyInput) -> [bool; 13] {
     let Some(public_key) = decode_public_key(&input.pubkey) else {
-        return [false; 3];
+        return [false; 13];
     };
     let Some(signature) =
         decode_hex_array(&input.signature).and_then(|bytes| Signature::from_bytes(&bytes).ok())
     else {
-        return [false; 3];
+        return [false; 13];
     };
     let Some(message) = decode_hex(&input.message) else {
-        return [false; 3];
+        return [false; 13];
     };
-    let hashed = HashedMessage::new(&message);
-    let prepared = hashed.prepare();
-
-    [
-        signature.verify_message(&public_key, &message),
-        signature.verify(&public_key, &hashed),
-        signature.verify_prepared(&public_key, &prepared),
-    ]
+    verify_single_at_each_entry_point(&public_key, &message, &signature)
 }
 
 #[cfg(feature = "dangerous-proof-bypass")]

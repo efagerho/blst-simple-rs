@@ -1,5 +1,105 @@
+#[cfg(feature = "dangerous-proof-bypass")]
+use blst_simple_rs::{
+    AggregatePublicKey, AggregateSignature, AggregateVerifier, HashedMessage, PublicKey, Signature,
+};
+
+#[cfg(feature = "dangerous-proof-bypass")]
+pub const SINGLE_VERIFICATION_PATHS: [&str; 13] = [
+    "raw-message signature",
+    "hashed-message signature",
+    "prepared-message signature",
+    "raw message with keys",
+    "hashed message with keys",
+    "prepared message with keys",
+    "raw message with aggregate key",
+    "hashed message with aggregate key",
+    "prepared message with aggregate key",
+    "hashed-message group slice",
+    "prepared-message group slice",
+    "hashed-message stream",
+    "prepared-message stream",
+];
+
 pub fn decode_hex_array<const N: usize>(input: &str) -> Option<[u8; N]> {
     decode_hex(input)?.try_into().ok()
+}
+
+#[cfg(feature = "dangerous-proof-bypass")]
+pub fn verify_single_at_each_entry_point(
+    key: &PublicKey,
+    message: &[u8],
+    signature: &Signature,
+) -> [bool; 13] {
+    let hashed = HashedMessage::new(message);
+    let prepared = hashed.prepare();
+    let aggregate = AggregateSignature::from(signature);
+    let aggregate_results = verify_fast_aggregate_at_each_entry_point(&[*key], message, &aggregate);
+
+    [
+        signature.verify_message(key, message),
+        signature.verify(key, &hashed),
+        signature.verify_prepared(key, &prepared),
+        aggregate_results[0],
+        aggregate_results[1],
+        aggregate_results[2],
+        aggregate_results[3],
+        aggregate_results[4],
+        aggregate_results[5],
+        aggregate_results[6],
+        aggregate_results[7],
+        aggregate_results[8],
+        aggregate_results[9],
+    ]
+}
+
+#[cfg(feature = "dangerous-proof-bypass")]
+pub fn verify_fast_aggregate_at_each_entry_point(
+    keys: &[PublicKey],
+    message: &[u8],
+    signature: &AggregateSignature,
+) -> [bool; 10] {
+    let hashed = HashedMessage::new(message);
+    let prepared = hashed.prepare();
+    let with_keys = [
+        signature.verify_message_with_keys(keys, message),
+        signature.verify_with_keys(keys, &hashed),
+        signature.verify_prepared_with_keys(keys, &prepared),
+    ];
+    let Ok(key) = AggregatePublicKey::from_keys(keys) else {
+        return [
+            with_keys[0],
+            with_keys[1],
+            with_keys[2],
+            false,
+            false,
+            false,
+            false,
+            false,
+            false,
+            false,
+        ];
+    };
+
+    let groups = [(&key, &hashed)];
+    let prepared_groups = [(&key, &prepared)];
+    let mut verifier = AggregateVerifier::new(1);
+    let streamed = verifier.add(&key, &hashed).is_ok() && verifier.finish_and_reset(signature);
+    let mut verifier = AggregateVerifier::new(1);
+    let streamed_prepared =
+        verifier.add_prepared(&key, &prepared).is_ok() && verifier.finish_and_reset(signature);
+
+    [
+        with_keys[0],
+        with_keys[1],
+        with_keys[2],
+        signature.verify_message(&key, message),
+        signature.verify(&key, &hashed),
+        signature.verify_prepared(&key, &prepared),
+        signature.verify_groups(&groups),
+        signature.verify_prepared_groups(&prepared_groups),
+        streamed,
+        streamed_prepared,
+    ]
 }
 
 pub fn decode_hex(input: &str) -> Option<Vec<u8>> {
