@@ -1,5 +1,5 @@
 use core::fmt;
-use std::collections::{HashMap, hash_map::Entry};
+use std::collections::{HashMap, TryReserveError, hash_map::Entry};
 
 use crate::ffi::{
     self, G1Affine, G1Projective, G2Affine, MILLER_LOOP_BATCH_SIZE, MillerLoopResult, PreparedLines,
@@ -230,8 +230,9 @@ impl PairingAccumulator {
 /// messages are also accumulated so their final sum can be validated. The
 /// caller-selected distinct-message limit bounds the retained grouping state.
 /// Repeated messages do not consume additional slots.
-/// [`finish_and_reset`](Self::finish_and_reset) clears the groups while
-/// retaining the hash table's allocation for reuse.
+/// [`finish_and_reset`](Self::finish_and_reset) decides the verification, and
+/// [`reset`](Self::reset) discards it. Both retain the hash table's allocation
+/// for reuse.
 pub struct AggregateVerifier {
     pairings: PairingAccumulator,
     grouped_keys: HashMap<[u8; 96], G1Projective>,
@@ -247,33 +248,35 @@ impl AggregateVerifier {
     /// `maximum_distinct_messages`. A maximum of zero rejects every group.
     #[must_use]
     pub fn new(maximum_distinct_messages: usize) -> Self {
-        Self::with_initial_capacity(maximum_distinct_messages, 0)
+        Self {
+            pairings: PairingAccumulator::new(),
+            grouped_keys: HashMap::new(),
+            maximum_distinct_messages,
+            overflowed: false,
+        }
     }
 
     /// Creates a verifier with a hard distinct-message limit and an allocation
     /// sized for the expected number of distinct messages.
     ///
     /// `initial_capacity` is capped at `maximum_distinct_messages`. The table
-    /// grows as needed until the maximum is reached.
-    #[must_use]
-    pub fn with_initial_capacity(
+    /// grows as needed until the maximum is reached. Returns an error if the
+    /// requested capacity exceeds the collection's limit or allocation fails.
+    pub fn try_with_initial_capacity(
         maximum_distinct_messages: usize,
         initial_capacity: usize,
-    ) -> Self {
+    ) -> Result<Self, TryReserveError> {
         let initial_capacity = initial_capacity.min(maximum_distinct_messages);
-        Self {
-            pairings: PairingAccumulator::new(),
-            grouped_keys: HashMap::with_capacity(initial_capacity),
-            maximum_distinct_messages,
-            overflowed: false,
-        }
+        let mut verifier = Self::new(maximum_distinct_messages);
+        verifier.grouped_keys.try_reserve(initial_capacity)?;
+        Ok(verifier)
     }
 
     /// Adds one aggregate-key/hashed-message group.
     ///
     /// An excess distinct message poisons the current verification. Further
     /// additions do no pairing work and return the same error until
-    /// [`Self::finish_and_reset`] is called.
+    /// [`Self::reset`] or [`Self::finish_and_reset`] is called.
     pub fn add(
         &mut self,
         key: &AggregatePublicKey,
@@ -288,7 +291,7 @@ impl AggregateVerifier {
     ///
     /// An excess distinct message poisons the current verification. Further
     /// additions do no pairing work and return the same error until
-    /// [`Self::finish_and_reset`] is called.
+    /// [`Self::reset`] or [`Self::finish_and_reset`] is called.
     pub fn add_prepared(
         &mut self,
         key: &AggregatePublicKey,
@@ -344,7 +347,11 @@ impl AggregateVerifier {
         valid
     }
 
-    fn reset(&mut self) {
+    /// Discards the current verification state while retaining allocated
+    /// capacity for reuse.
+    ///
+    /// This also clears a distinct-message-limit error.
+    pub fn reset(&mut self) {
         self.pairings.reset();
         self.grouped_keys.clear();
         self.overflowed = false;
@@ -649,7 +656,7 @@ mod tests {
         }
 
         let groups: Vec<_> = keys.iter().zip(&messages).collect();
-        let mut verifier = AggregateVerifier::with_initial_capacity(messages.len(), 1);
+        let mut verifier = AggregateVerifier::try_with_initial_capacity(messages.len(), 1).unwrap();
 
         for count in [
             1,
@@ -810,7 +817,7 @@ mod tests {
         let wrong_signature = AggregateSignature::from(wrong_signature);
         let message = HashedMessage::new(b"message");
         let prepared = message.prepare();
-        let mut verifier = AggregateVerifier::with_initial_capacity(4, 4);
+        let mut verifier = AggregateVerifier::try_with_initial_capacity(4, 4).unwrap();
         let capacity = verifier.grouped_keys.capacity();
 
         assert!(capacity >= 4);
@@ -860,10 +867,15 @@ mod tests {
 
     #[test]
     fn initial_capacity_is_capped_at_the_distinct_message_limit() {
-        let verifier = AggregateVerifier::with_initial_capacity(0, usize::MAX);
+        let verifier = AggregateVerifier::try_with_initial_capacity(0, usize::MAX).unwrap();
 
         assert_eq!(verifier.maximum_distinct_messages, 0);
         assert_eq!(verifier.grouped_keys.capacity(), 0);
+    }
+
+    #[test]
+    fn unrepresentable_initial_capacity_returns_an_error() {
+        assert!(AggregateVerifier::try_with_initial_capacity(usize::MAX, usize::MAX).is_err());
     }
 
     #[test]
@@ -1010,12 +1022,20 @@ mod tests {
         let key = AggregatePublicKey::from(key);
         let signature = AggregateSignature::from(signature);
         let message = HashedMessage::new(b"message");
-        let mut verifier = AggregateVerifier::new(1);
+        let error = TooManyDistinctMessagesError { maximum: 1 };
+        let mut verifier = AggregateVerifier::try_with_initial_capacity(1, 1).unwrap();
+        let capacity = verifier.grouped_keys.capacity();
 
         verifier
             .add(&key, &HashedMessage::new(b"wrong message"))
             .unwrap();
-        assert!(!verifier.finish_and_reset(&signature));
+        assert_eq!(verifier.add(&key, &message), Err(error));
+        verifier.reset();
+
+        assert!(verifier.grouped_keys.is_empty());
+        assert_eq!(verifier.grouped_keys.capacity(), capacity);
+        assert_eq!(verifier.pairings.staged, 0);
+        assert!(!verifier.overflowed);
 
         verifier.add(&key, &message).unwrap();
         assert!(verifier.finish_and_reset(&signature));
