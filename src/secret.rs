@@ -176,29 +176,8 @@ mod tests {
 
     use super::{KeyMaterialTooShortError, SecretKey, SecretKeyError};
     use crate::suite::{PROOF_OF_POSSESSION_DST, SIGNATURE_DST};
+    use crate::test_util::{hex, hex_bytes};
     use crate::{HashedMessage, hierarchical, keygen};
-
-    fn hex_bytes(input: &str) -> Vec<u8> {
-        fn nibble(byte: u8) -> u8 {
-            match byte {
-                b'0'..=b'9' => byte - b'0',
-                b'a'..=b'f' => byte - b'a' + 10,
-                b'A'..=b'F' => byte - b'A' + 10,
-                _ => panic!("invalid hexadecimal digit"),
-            }
-        }
-
-        assert_eq!(input.len() % 2, 0);
-        input
-            .as_bytes()
-            .chunks_exact(2)
-            .map(|digits| (nibble(digits[0]) << 4) | nibble(digits[1]))
-            .collect()
-    }
-
-    fn hex<const N: usize>(input: &str) -> [u8; N] {
-        hex_bytes(input).try_into().unwrap()
-    }
 
     #[test]
     fn rejects_short_key_material() {
