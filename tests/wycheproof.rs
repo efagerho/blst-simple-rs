@@ -1,8 +1,6 @@
-#![cfg(blst_simple_dangerous)]
-
 mod common;
 
-use blst_simple_rs::{Signature, UnverifiedPublicKey, dangerous::assume_proof_verified};
+use blst_simple_rs::{Signature, UnverifiedPublicKey};
 use common::{
     SINGLE_VERIFICATION_PATHS, decode_hex, decode_hex_array, verify_single_at_each_entry_point,
 };
@@ -83,24 +81,22 @@ fn bls_pop_signature_verification() {
     }
 }
 
-fn verify_at_each_entry_point(public_key: &str, message: &str, signature: &str) -> [bool; 13] {
+fn verify_at_each_entry_point(public_key: &str, message: &str, signature: &str) -> [bool; 3] {
     let Some(public_key) = decode_hex_array(public_key) else {
-        return [false; 13];
+        return [false; 3];
     };
     let Some(message) = decode_hex(message) else {
-        return [false; 13];
+        return [false; 3];
     };
     let Some(signature) = decode_hex_array(signature) else {
-        return [false; 13];
+        return [false; 3];
     };
     let Ok(public_key) = UnverifiedPublicKey::from_bytes(&public_key) else {
-        return [false; 13];
+        return [false; 3];
     };
     let Ok(signature) = Signature::from_bytes(&signature) else {
-        return [false; 13];
+        return [false; 3];
     };
 
-    // A single-signature pairing equation does not rely on proof of possession.
-    let public_key = assume_proof_verified(public_key);
     verify_single_at_each_entry_point(&public_key, &message, &signature)
 }

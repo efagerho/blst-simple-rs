@@ -6,26 +6,29 @@ use crate::ffi::{
 };
 use crate::{
     AggregatePublicKey, AggregateSignature, HashedMessage, PreparedMessage, PublicKey, Signature,
-    TooManyDistinctMessagesError,
+    TooManyDistinctMessagesError, UnverifiedPublicKey,
 };
 
 impl Signature {
     /// Hashes and verifies a message for one signer.
+    ///
+    /// Proof of possession is not required because no public keys are
+    /// aggregated.
     #[must_use]
-    pub fn verify_message(&self, key: &PublicKey, message: &[u8]) -> bool {
+    pub fn verify_message(&self, key: &UnverifiedPublicKey, message: &[u8]) -> bool {
         self.verify(key, &HashedMessage::new(message))
     }
 
     /// Verifies a previously hashed message for one signer.
     #[must_use]
-    pub fn verify(&self, key: &PublicKey, message: &HashedMessage) -> bool {
-        ffi::verify_signature(&key.unverified.point, &message.point, &self.point)
+    pub fn verify(&self, key: &UnverifiedPublicKey, message: &HashedMessage) -> bool {
+        ffi::verify_signature(&key.point, &message.point, &self.point)
     }
 
     /// Verifies a prepared message for one signer.
     #[must_use]
-    pub fn verify_prepared(&self, key: &PublicKey, message: &PreparedMessage) -> bool {
-        ffi::verify_prepared_signature(&key.unverified.point, &message.lines, &self.point)
+    pub fn verify_prepared(&self, key: &UnverifiedPublicKey, message: &PreparedMessage) -> bool {
+        ffi::verify_prepared_signature(&key.point, &message.lines, &self.point)
     }
 }
 
