@@ -35,11 +35,7 @@ impl HashedMessage {
 
 impl Hash for HashedMessage {
     fn hash<H: Hasher>(&self, state: &mut H) {
-        for coordinate in [&self.point.x, &self.point.y] {
-            for component in &coordinate.fp {
-                component.l.hash(state);
-            }
-        }
+        ffi::hash_g2(&self.point, state);
     }
 }
 

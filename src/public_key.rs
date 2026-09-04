@@ -32,9 +32,7 @@ impl UnverifiedPublicKey {
 
 impl Hash for UnverifiedPublicKey {
     fn hash<H: Hasher>(&self, state: &mut H) {
-        for coordinate in [&self.point.x, &self.point.y] {
-            coordinate.l.hash(state);
-        }
+        ffi::hash_g1(&self.point, state);
     }
 }
 

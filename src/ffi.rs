@@ -1,3 +1,4 @@
+use core::hash::{Hash, Hasher};
 use core::mem::MaybeUninit;
 use core::ptr;
 #[cfg(feature = "signing")]
@@ -15,6 +16,20 @@ pub(crate) type PreparedLines = [blst::blst_fp6; 68];
 pub(crate) const MILLER_LOOP_BATCH_SIZE: usize = 16;
 #[cfg(feature = "signing")]
 pub(crate) type Scalar = blst::blst_scalar;
+
+pub(crate) fn hash_g1<H: Hasher>(point: &G1Affine, state: &mut H) {
+    for coordinate in [&point.x, &point.y] {
+        coordinate.l.hash(state);
+    }
+}
+
+pub(crate) fn hash_g2<H: Hasher>(point: &G2Affine, state: &mut H) {
+    for coordinate in [&point.x, &point.y] {
+        for component in &coordinate.fp {
+            component.l.hash(state);
+        }
+    }
+}
 
 pub(crate) fn hash_message(message: &[u8]) -> G2Affine {
     hash_to_g2(message, SIGNATURE_DST)
