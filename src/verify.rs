@@ -81,9 +81,25 @@ impl AggregateSignature {
     /// slice.
     #[must_use]
     pub fn verify_groups(&self, groups: &[(&AggregatePublicKey, &HashedMessage)]) -> bool {
-        let mut verifier = AggregateVerifier::new(self);
-        verifier.extend(groups);
-        verifier.finish()
+        if groups.is_empty() {
+            return false;
+        }
+
+        let mut accumulator = ffi::miller_loop_identity();
+        let mut keys = [G1Affine::default(); MILLER_LOOP_BATCH_SIZE];
+        let mut messages = [G2Affine::default(); MILLER_LOOP_BATCH_SIZE];
+
+        for chunk in groups.chunks(MILLER_LOOP_BATCH_SIZE) {
+            for (index, &(key, message)) in chunk.iter().enumerate() {
+                keys[index] = key.point;
+                messages[index] = message.point;
+            }
+
+            let term = ffi::miller_loop_many(&keys[..chunk.len()], &messages[..chunk.len()]);
+            ffi::multiply_miller_loop(&mut accumulator, &term);
+        }
+
+        ffi::verify_miller_loop_product(&accumulator, &self.point)
     }
 
     /// Verifies a non-empty slice of aggregate-key/prepared-message groups.
@@ -96,9 +112,17 @@ impl AggregateSignature {
         &self,
         groups: &[(&AggregatePublicKey, &PreparedMessage)],
     ) -> bool {
-        let mut verifier = AggregateVerifier::new(self);
-        verifier.extend_prepared(groups);
-        verifier.finish()
+        if groups.is_empty() {
+            return false;
+        }
+
+        let mut accumulator = ffi::miller_loop_identity();
+        for &(key, message) in groups {
+            let term = ffi::miller_loop_prepared(&key.point, &message.lines);
+            ffi::multiply_miller_loop(&mut accumulator, &term);
+        }
+
+        ffi::verify_miller_loop_product(&accumulator, &self.point)
     }
 }
 
