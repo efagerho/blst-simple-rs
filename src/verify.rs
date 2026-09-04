@@ -414,6 +414,7 @@ mod tests {
     use super::AggregateVerifier;
     use crate::ffi::MILLER_LOOP_BATCH_SIZE;
     use crate::suite::{PROOF_OF_POSSESSION_DST, SIGNATURE_DST};
+    use crate::test_util::hex;
     use crate::{
         AggregatePublicKey, AggregateSignature, AggregateSignatureBuilder, HashedMessage,
         PublicKey, Signature, TooManyDistinctMessagesError,
@@ -423,24 +424,6 @@ mod tests {
         let mut scalar = [0; 32];
         scalar[31] = value;
         scalar
-    }
-
-    fn hex<const N: usize>(input: &str) -> [u8; N] {
-        fn nibble(byte: u8) -> u8 {
-            match byte {
-                b'0'..=b'9' => byte - b'0',
-                b'a'..=b'f' => byte - b'a' + 10,
-                b'A'..=b'F' => byte - b'A' + 10,
-                _ => panic!("invalid hexadecimal digit"),
-            }
-        }
-
-        assert_eq!(input.len(), N * 2);
-        let mut output = [0; N];
-        for (byte, digits) in output.iter_mut().zip(input.as_bytes().chunks_exact(2)) {
-            *byte = (nibble(digits[0]) << 4) | nibble(digits[1]);
-        }
-        output
     }
 
     fn participant(secret: [u8; 32], message: &[u8]) -> (PublicKey, Signature) {

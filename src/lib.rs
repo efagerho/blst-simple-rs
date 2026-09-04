@@ -17,6 +17,8 @@ mod public_key;
 mod secret;
 mod signature;
 mod suite;
+#[cfg(test)]
+mod test_util;
 mod verify;
 
 /// APIs that bypass validation enforced by the crate's safe types.
