@@ -109,9 +109,11 @@ mod tests {
     fn equal_messages_compare_and_hash_equally() {
         let first = HashedMessage::new(b"same message");
         let second = HashedMessage::new(b"same message");
+        let different = HashedMessage::new(b"different message");
 
         assert_eq!(first, second);
         assert_eq!(hash(&first), hash(&second));
+        assert_ne!(first, different);
     }
 
     #[test]

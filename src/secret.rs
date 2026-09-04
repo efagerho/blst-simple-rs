@@ -331,4 +331,22 @@ mod tests {
         assert_eq!(format!("{secret_key:?}"), "SecretKey(REDACTED)");
         assert_eq!(size_of::<SecretKey>(), 32);
     }
+
+    #[test]
+    fn errors_report_the_rejected_input() {
+        assert_eq!(
+            format!("{}", SecretKeyError::InvalidEncoding),
+            "invalid secret-key encoding"
+        );
+        assert_eq!(
+            format!(
+                "{}",
+                KeyMaterialTooShortError {
+                    supplied: 31,
+                    minimum: 32,
+                }
+            ),
+            "key material is too short (supplied 31, minimum 32)"
+        );
+    }
 }

@@ -60,18 +60,22 @@ pub(crate) fn compress_g1(point: &G1Affine) -> [u8; 48] {
     bytes
 }
 
+fn decode_status(status: blst::BLST_ERROR) -> Result<(), DecodeError> {
+    match status {
+        blst::BLST_ERROR::BLST_SUCCESS => Ok(()),
+        blst::BLST_ERROR::BLST_BAD_ENCODING => Err(DecodeError::BadEncoding),
+        blst::BLST_ERROR::BLST_POINT_NOT_ON_CURVE => Err(DecodeError::NotOnCurve),
+        blst::BLST_ERROR::BLST_POINT_NOT_IN_GROUP => Err(DecodeError::NotInGroup),
+        blst::BLST_ERROR::BLST_PK_IS_INFINITY => Err(DecodeError::PointAtInfinity),
+        error => unreachable!("unexpected BLST decoding error: {error:?}"),
+    }
+}
+
 pub(crate) fn decode_non_identity_g1(bytes: &[u8; 48]) -> Result<G1Affine, DecodeError> {
     let mut point = MaybeUninit::<G1Affine>::uninit();
 
     unsafe {
-        match blst::blst_p1_uncompress(point.as_mut_ptr(), bytes.as_ptr()) {
-            blst::BLST_ERROR::BLST_SUCCESS => {}
-            blst::BLST_ERROR::BLST_BAD_ENCODING => return Err(DecodeError::BadEncoding),
-            blst::BLST_ERROR::BLST_POINT_NOT_ON_CURVE => return Err(DecodeError::NotOnCurve),
-            blst::BLST_ERROR::BLST_POINT_NOT_IN_GROUP => return Err(DecodeError::NotInGroup),
-            blst::BLST_ERROR::BLST_PK_IS_INFINITY => return Err(DecodeError::PointAtInfinity),
-            error => unreachable!("unexpected BLST decoding error: {error:?}"),
-        }
+        decode_status(blst::blst_p1_uncompress(point.as_mut_ptr(), bytes.as_ptr()))?;
 
         let point = point.assume_init();
         if blst::blst_p1_affine_is_inf(&point) {
@@ -120,14 +124,7 @@ pub(crate) fn decode_g2(bytes: &[u8; 96]) -> Result<G2Affine, DecodeError> {
     let mut point = MaybeUninit::<G2Affine>::uninit();
 
     unsafe {
-        match blst::blst_p2_uncompress(point.as_mut_ptr(), bytes.as_ptr()) {
-            blst::BLST_ERROR::BLST_SUCCESS => {}
-            blst::BLST_ERROR::BLST_BAD_ENCODING => return Err(DecodeError::BadEncoding),
-            blst::BLST_ERROR::BLST_POINT_NOT_ON_CURVE => return Err(DecodeError::NotOnCurve),
-            blst::BLST_ERROR::BLST_POINT_NOT_IN_GROUP => return Err(DecodeError::NotInGroup),
-            blst::BLST_ERROR::BLST_PK_IS_INFINITY => return Err(DecodeError::PointAtInfinity),
-            error => unreachable!("unexpected BLST decoding error: {error:?}"),
-        }
+        decode_status(blst::blst_p2_uncompress(point.as_mut_ptr(), bytes.as_ptr()))?;
 
         let point = point.assume_init();
         if !blst::blst_p2_affine_in_g2(&point) {
@@ -413,4 +410,96 @@ pub(crate) fn zeroize_scalar(scalar: &mut Scalar) {
         }
     }
     compiler_fence(Ordering::SeqCst);
+}
+
+#[cfg(test)]
+mod tests {
+    extern crate std;
+
+    use std::panic;
+
+    use super::{G1Affine, G2Affine, compress_g2, decode_status, hash_to_g2, miller_loop_many};
+    use crate::DecodeError;
+    use crate::suite::SIGNATURE_DST;
+
+    #[test]
+    fn maps_every_blst_decode_status() {
+        use blst::BLST_ERROR::{
+            BLST_AGGR_TYPE_MISMATCH, BLST_BAD_ENCODING, BLST_BAD_SCALAR, BLST_PK_IS_INFINITY,
+            BLST_POINT_NOT_IN_GROUP, BLST_POINT_NOT_ON_CURVE, BLST_SUCCESS, BLST_VERIFY_FAIL,
+        };
+
+        assert_eq!(decode_status(BLST_SUCCESS), Ok(()));
+        assert_eq!(
+            decode_status(BLST_BAD_ENCODING),
+            Err(DecodeError::BadEncoding)
+        );
+        assert_eq!(
+            decode_status(BLST_POINT_NOT_ON_CURVE),
+            Err(DecodeError::NotOnCurve)
+        );
+        assert_eq!(
+            decode_status(BLST_POINT_NOT_IN_GROUP),
+            Err(DecodeError::NotInGroup)
+        );
+        assert_eq!(
+            decode_status(BLST_PK_IS_INFINITY),
+            Err(DecodeError::PointAtInfinity)
+        );
+
+        for status in [BLST_AGGR_TYPE_MISMATCH, BLST_VERIFY_FAIL, BLST_BAD_SCALAR] {
+            assert!(panic::catch_unwind(|| decode_status(status)).is_err());
+        }
+    }
+
+    #[test]
+    fn hashes_empty_message_and_domain_separation_buffers() {
+        let mut scalar = [0; 32];
+        scalar[31] = 1;
+        let secret = blst::min_pk::SecretKey::from_bytes(&scalar).unwrap();
+
+        for (message, dst) in [(&b""[..], SIGNATURE_DST), (&b"message"[..], &b""[..])] {
+            assert_eq!(
+                compress_g2(&hash_to_g2(message, dst)),
+                secret.sign(message, dst, b"").to_bytes()
+            );
+        }
+    }
+
+    #[test]
+    #[should_panic(expected = "assertion `left == right` failed")]
+    fn rejects_mismatched_miller_loop_inputs() {
+        miller_loop_many(&[], &[G2Affine::default()]);
+    }
+
+    #[test]
+    #[should_panic(expected = "assertion failed: !keys.is_empty()")]
+    fn rejects_empty_miller_loop_inputs() {
+        miller_loop_many(&[], &[]);
+    }
+
+    #[test]
+    #[should_panic(expected = "assertion failed: keys.len() <= MILLER_LOOP_BATCH_SIZE")]
+    fn rejects_oversized_miller_loop_batches() {
+        miller_loop_many(&[G1Affine::default(); 17], &[G2Affine::default(); 17]);
+    }
+
+    #[cfg(feature = "signing")]
+    #[test]
+    #[should_panic(expected = "key material is too short")]
+    fn rejects_invalid_internal_key_material() {
+        super::derive_key_material(b"", b"", b"");
+    }
+
+    #[cfg(feature = "signing")]
+    #[test]
+    fn zeroizes_scalar_storage() {
+        let mut bytes = [0; 32];
+        bytes[31] = 1;
+        let mut scalar = super::decode_scalar(&bytes).unwrap();
+
+        super::zeroize_scalar(&mut scalar);
+
+        assert!(scalar.b.iter().all(|byte| *byte == 0));
+    }
 }

@@ -241,6 +241,7 @@ mod tests {
     use core::hash::{Hash, Hasher};
 
     use std::collections::hash_map::DefaultHasher;
+    use std::format;
     use std::vec::Vec;
 
     use super::{
@@ -374,6 +375,27 @@ mod tests {
     }
 
     #[test]
+    fn empty_signature_extensions_are_noops() {
+        let signature = signature(scalar(1), b"message");
+        let expected = AggregateSignature::from(&signature);
+        let mut identity_bytes = [0; 96];
+        identity_bytes[0] = 0xc0;
+        let identity = AggregateSignature::from_bytes(&identity_bytes).unwrap();
+        let mut builder = AggregateSignatureBuilder::new(&signature);
+
+        builder.extend(&[]);
+        builder.extend_aggregates(&[]);
+        builder.add_aggregate(&identity);
+
+        assert_eq!(builder.finish(), expected);
+        assert_eq!(AggregateSignature::from(signature), expected);
+
+        let mut builder = AggregateSignatureBuilder::from_aggregate(&identity);
+        builder.add(&signature);
+        assert_eq!(builder.finish(), expected);
+    }
+
+    #[test]
     fn decodes_aggregate_signatures_and_allows_identity() {
         let first = signature(scalar(1), b"one");
         let second = signature(scalar(2), b"two");
@@ -481,6 +503,20 @@ mod tests {
     }
 
     #[test]
+    fn one_key_and_empty_extensions_preserve_the_key() {
+        let key = public_key(scalar(1));
+        let expected = AggregatePublicKey::from(&key);
+        let mut builder = AggregatePublicKeyBuilder::new(&key);
+
+        builder.extend(&[]);
+        builder.extend_aggregates(&[]);
+
+        assert_eq!(AggregatePublicKey::from_keys(&[key]).unwrap(), expected);
+        assert_eq!(builder.finish().unwrap(), expected);
+        assert_eq!(AggregatePublicKey::from(key), expected);
+    }
+
+    #[test]
     fn rejects_public_keys_that_cancel_to_identity() {
         let generator = public_key(scalar(1));
         let negative_generator = public_key(hex(
@@ -495,5 +531,20 @@ mod tests {
         let mut builder = AggregatePublicKeyBuilder::new(&generator);
         builder.add(&negative_generator);
         assert_eq!(builder.finish(), Err(AggregateError::InvalidKeyCombination));
+    }
+
+    #[test]
+    fn builder_debug_omits_curve_points() {
+        let signature = signature(scalar(1), b"message");
+        let key = public_key(scalar(1));
+
+        assert_eq!(
+            format!("{:?}", AggregateSignatureBuilder::new(&signature)),
+            "AggregateSignatureBuilder { .. }"
+        );
+        assert_eq!(
+            format!("{:?}", AggregatePublicKeyBuilder::new(&key)),
+            "AggregatePublicKeyBuilder { .. }"
+        );
     }
 }
