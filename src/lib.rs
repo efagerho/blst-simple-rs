@@ -31,6 +31,8 @@ pub use aggregate::{
     AggregatePublicKey, AggregatePublicKeyBuilder, AggregateSignature, AggregateSignatureBuilder,
 };
 pub use error::{AggregateError, DecodeError, InvalidProofError, ProofVerificationError};
+#[cfg(feature = "signing")]
+pub use keygen::KeyInfoTooLongError;
 pub use message::{HashedMessage, PreparedMessage};
 pub use proof::ProofOfPossession;
 pub use public_key::{PublicKey, UnverifiedPublicKey};
