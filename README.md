@@ -17,6 +17,9 @@ bypass proof-of-possession verification and can make aggregate signatures
 forgeable if misused. Only use this if you understand the cryptography and
 know what you're doing.
 
+Enable the `dangerous` feature to enable both security-sensitive capabilities
+at once.
+
 ## CPU features
 
 On x86_64, BLST automatically detects ADX support on the build host and uses it
