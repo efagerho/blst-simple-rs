@@ -185,6 +185,11 @@ pub(crate) fn g1_is_identity(point: &G1Projective) -> bool {
     unsafe { blst::blst_p1_is_inf(point) }
 }
 
+fn g1_affine_is_identity(point: &G1Affine) -> bool {
+    // SAFETY: `point` is initialized and valid for this read-only predicate.
+    unsafe { blst::blst_p1_affine_is_inf(point) }
+}
+
 pub(crate) fn g2_from_affine(point: &G2Affine) -> G2Projective {
     let mut projective = MaybeUninit::<G2Projective>::uninit();
 
@@ -246,10 +251,32 @@ pub(crate) fn miller_loop(key: &G1Affine, message: &G2Affine) -> MillerLoopResul
     }
 }
 
+/// Computes a batch of Miller loops.
+///
+/// # Panics
+///
+/// Panics unless the slices have the same nonzero length, fit in one batch,
+/// and contain no identity points. The batched primitive does not treat an
+/// identity input as the multiplicative identity.
 pub(crate) fn miller_loop_many(keys: &[G1Affine], messages: &[G2Affine]) -> MillerLoopResult {
-    assert_eq!(keys.len(), messages.len());
-    assert!(!keys.is_empty());
-    assert!(keys.len() <= MILLER_LOOP_BATCH_SIZE);
+    assert_eq!(
+        keys.len(),
+        messages.len(),
+        "miller-loop key and message counts differ"
+    );
+    assert!(!keys.is_empty(), "miller-loop batch must not be empty");
+    assert!(
+        keys.len() <= MILLER_LOOP_BATCH_SIZE,
+        "miller-loop batch exceeds maximum size"
+    );
+    assert!(
+        keys.iter().all(|key| !g1_affine_is_identity(key)),
+        "miller-loop keys must not contain the identity"
+    );
+    assert!(
+        messages.iter().all(|message| !g2_is_identity(message)),
+        "miller-loop messages must not contain the identity"
+    );
 
     let mut key_pointers = [ptr::null::<G1Affine>(); MILLER_LOOP_BATCH_SIZE];
     let mut message_pointers = [ptr::null::<G2Affine>(); MILLER_LOOP_BATCH_SIZE];
@@ -259,9 +286,10 @@ pub(crate) fn miller_loop_many(keys: &[G1Affine], messages: &[G2Affine]) -> Mill
     }
 
     let mut result = MaybeUninit::<MillerLoopResult>::uninit();
-    // SAFETY: The assertions bound the nonzero count by both pointer arrays.
-    // Their first `keys.len()` entries point to initialized values that remain
-    // alive for the call, and BLST initializes the complete output.
+    // SAFETY: The assertions bound the nonzero count by both pointer arrays
+    // and exclude identity inputs. Their first `keys.len()` entries point to
+    // initialized values that remain alive for the call, and BLST initializes
+    // the complete output.
     unsafe {
         blst::blst_miller_loop_n(
             result.as_mut_ptr(),
@@ -480,7 +508,10 @@ pub(crate) fn zeroize_scalar(scalar: &mut Scalar) {
 mod tests {
     use std::panic;
 
-    use super::{G1Affine, G2Affine, compress_g2, decode_status, hash_to_g2, miller_loop_many};
+    use super::{
+        G1Affine, G2Affine, MILLER_LOOP_BATCH_SIZE, compress_g2, decode_status, hash_to_g2,
+        miller_loop_many,
+    };
     use crate::DecodeError;
     use crate::suite::SIGNATURE_DST;
 
@@ -529,21 +560,42 @@ mod tests {
     }
 
     #[test]
-    #[should_panic(expected = "assertion `left == right` failed")]
+    #[should_panic(expected = "miller-loop key and message counts differ")]
     fn rejects_mismatched_miller_loop_inputs() {
         miller_loop_many(&[], &[G2Affine::default()]);
     }
 
     #[test]
-    #[should_panic(expected = "assertion failed: !keys.is_empty()")]
+    #[should_panic(expected = "miller-loop batch must not be empty")]
     fn rejects_empty_miller_loop_inputs() {
         miller_loop_many(&[], &[]);
     }
 
     #[test]
-    #[should_panic(expected = "assertion failed: keys.len() <= MILLER_LOOP_BATCH_SIZE")]
+    #[should_panic(expected = "miller-loop batch exceeds maximum size")]
     fn rejects_oversized_miller_loop_batches() {
-        miller_loop_many(&[G1Affine::default(); 17], &[G2Affine::default(); 17]);
+        miller_loop_many(
+            &[G1Affine::default(); MILLER_LOOP_BATCH_SIZE + 1],
+            &[G2Affine::default(); MILLER_LOOP_BATCH_SIZE + 1],
+        );
+    }
+
+    #[test]
+    #[should_panic(expected = "miller-loop keys must not contain the identity")]
+    fn rejects_identity_miller_loop_keys() {
+        let message = hash_to_g2(b"message", SIGNATURE_DST);
+
+        miller_loop_many(&[G1Affine::default()], &[message]);
+    }
+
+    #[test]
+    #[should_panic(expected = "miller-loop messages must not contain the identity")]
+    fn rejects_identity_miller_loop_messages() {
+        // SAFETY: BLST returns a non-null pointer to a static, initialized
+        // affine generator.
+        let key = unsafe { *blst::blst_p1_affine_generator() };
+
+        miller_loop_many(&[key], &[G2Affine::default()]);
     }
 
     #[cfg(feature = "signing")]
