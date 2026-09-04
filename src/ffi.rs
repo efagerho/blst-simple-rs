@@ -1,4 +1,3 @@
-use alloc::boxed::Box;
 use core::mem::MaybeUninit;
 use core::ptr;
 #[cfg(feature = "signing")]
@@ -414,8 +413,6 @@ pub(crate) fn zeroize_scalar(scalar: &mut Scalar) {
 
 #[cfg(test)]
 mod tests {
-    extern crate std;
-
     use std::panic;
 
     use super::{G1Affine, G2Affine, compress_g2, decode_status, hash_to_g2, miller_loop_many};

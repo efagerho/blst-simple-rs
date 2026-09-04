@@ -236,8 +236,6 @@ fn hash_g2<H: Hasher>(point: &G2Affine, state: &mut H) {
 
 #[cfg(test)]
 mod tests {
-    extern crate std;
-
     use core::hash::{Hash, Hasher};
 
     use std::collections::hash_map::DefaultHasher;

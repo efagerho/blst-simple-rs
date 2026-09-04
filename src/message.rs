@@ -1,4 +1,3 @@
-use alloc::boxed::Box;
 use core::fmt;
 use core::hash::{Hash, Hasher};
 
@@ -80,8 +79,6 @@ impl fmt::Debug for PreparedMessage {
 
 #[cfg(test)]
 mod tests {
-    extern crate std;
-
     use core::hash::{Hash, Hasher};
 
     use std::collections::hash_map::DefaultHasher;
