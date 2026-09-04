@@ -1,3 +1,5 @@
+#![deny(clippy::undocumented_unsafe_blocks)]
+
 //! Safe Rust API for the minimal-public-key-size proof-of-possession scheme in
 //! *BLS Signatures* (`draft-irtf-cfrg-bls-signature-07`).
 //!
