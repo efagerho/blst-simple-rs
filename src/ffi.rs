@@ -71,7 +71,7 @@ fn decode_status(status: blst::BLST_ERROR) -> Result<(), DecodeError> {
         blst::BLST_ERROR::BLST_POINT_NOT_ON_CURVE => Err(DecodeError::NotOnCurve),
         blst::BLST_ERROR::BLST_POINT_NOT_IN_GROUP => Err(DecodeError::NotInGroup),
         blst::BLST_ERROR::BLST_PK_IS_INFINITY => Err(DecodeError::PointAtInfinity),
-        error => unreachable!("unexpected BLST decoding error: {error:?}"),
+        _ => Err(DecodeError::BadEncoding),
     }
 }
 
@@ -506,8 +506,6 @@ pub(crate) fn zeroize_scalar(scalar: &mut Scalar) {
 
 #[cfg(test)]
 mod tests {
-    use std::panic;
-
     use super::{
         G1Affine, G2Affine, MILLER_LOOP_BATCH_SIZE, compress_g2, decode_status, hash_to_g2,
         miller_loop_many,
@@ -541,7 +539,7 @@ mod tests {
         );
 
         for status in [BLST_AGGR_TYPE_MISMATCH, BLST_VERIFY_FAIL, BLST_BAD_SCALAR] {
-            assert!(panic::catch_unwind(|| decode_status(status)).is_err());
+            assert_eq!(decode_status(status), Err(DecodeError::BadEncoding));
         }
     }
 
