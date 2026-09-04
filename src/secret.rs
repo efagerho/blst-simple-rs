@@ -258,7 +258,7 @@ mod tests {
         let salted = keygen::derive(&key_material, keygen::Parameters::new(b"salt")).unwrap();
         let informed = keygen::derive(
             &key_material,
-            keygen::Parameters::new(b"").with_info(b"context"),
+            keygen::Parameters::new(b"").with_info(b"context").unwrap(),
         )
         .unwrap();
 

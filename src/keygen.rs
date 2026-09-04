@@ -14,6 +14,9 @@ use core::fmt;
 use crate::secret::validate_key_material_length;
 use crate::{KeyMaterialTooShortError, SecretKey};
 
+/// Maximum number of application-context bytes accepted by [`Parameters`].
+pub const MAX_KEY_INFO_LENGTH: usize = 1024;
+
 /// `SHA-256("BLS-SIG-KEYGEN-SALT-")`.
 pub(crate) const COMPATIBILITY_SALT: [u8; 32] = [
     0xaf, 0xf1, 0xb7, 0x03, 0x64, 0x7f, 0xe4, 0xbd, 0x43, 0x3a, 0x89, 0x3a, 0x3d, 0x2b, 0xa5, 0x1a,
@@ -43,11 +46,18 @@ impl<'a> Parameters<'a> {
 
     /// Sets the optional application-specific `key_info` bytes.
     ///
-    /// Their interpretation is defined by the protocol using the key.
-    #[must_use]
-    pub const fn with_info(mut self, key_info: &'a [u8]) -> Self {
+    /// Their interpretation is defined by the protocol using the key. Returns
+    /// an error when `key_info` exceeds [`MAX_KEY_INFO_LENGTH`].
+    pub const fn with_info(mut self, key_info: &'a [u8]) -> Result<Self, KeyInfoTooLongError> {
+        if key_info.len() > MAX_KEY_INFO_LENGTH {
+            return Err(KeyInfoTooLongError {
+                supplied: key_info.len(),
+                maximum: MAX_KEY_INFO_LENGTH,
+            });
+        }
+
         self.key_info = key_info;
-        self
+        Ok(self)
     }
 }
 
@@ -77,6 +87,28 @@ impl fmt::Debug for Parameters<'_> {
     }
 }
 
+/// Application context exceeded the supported length.
+#[derive(Clone, Copy, Debug, PartialEq, Eq)]
+#[non_exhaustive]
+pub struct KeyInfoTooLongError {
+    /// The number of bytes supplied by the caller.
+    pub supplied: usize,
+    /// The maximum accepted number of bytes.
+    pub maximum: usize,
+}
+
+impl fmt::Display for KeyInfoTooLongError {
+    fn fmt(&self, f: &mut fmt::Formatter<'_>) -> fmt::Result {
+        write!(
+            f,
+            "key info is too long (supplied {}, maximum {})",
+            self.supplied, self.maximum
+        )
+    }
+}
+
+impl core::error::Error for KeyInfoTooLongError {}
+
 /// Derives a BLS secret key with caller-supplied `KeyGen` parameters.
 ///
 /// This implements `KeyGen` from *BLS Signatures*
@@ -93,4 +125,24 @@ pub fn derive(
         parameters.salt,
         parameters.key_info,
     ))
+}
+
+#[cfg(test)]
+mod tests {
+    use super::{KeyInfoTooLongError, MAX_KEY_INFO_LENGTH, Parameters};
+
+    #[test]
+    fn limits_key_info_length() {
+        let maximum = [0; MAX_KEY_INFO_LENGTH];
+        assert!(Parameters::new(b"salt").with_info(&maximum).is_ok());
+
+        let excessive = [0; MAX_KEY_INFO_LENGTH + 1];
+        assert_eq!(
+            Parameters::new(b"salt").with_info(&excessive).unwrap_err(),
+            KeyInfoTooLongError {
+                supplied: MAX_KEY_INFO_LENGTH + 1,
+                maximum: MAX_KEY_INFO_LENGTH,
+            }
+        );
+    }
 }
