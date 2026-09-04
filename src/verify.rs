@@ -2,7 +2,7 @@ use core::fmt;
 use std::collections::HashMap;
 
 use crate::ffi::{
-    self, G1Affine, G1Projective, G2Affine, MILLER_LOOP_BATCH_SIZE, MillerLoopResult,
+    self, G1Affine, G1Projective, G2Affine, MILLER_LOOP_BATCH_SIZE, MillerLoopResult, PreparedLines,
 };
 use crate::{
     AggregatePublicKey, AggregateSignature, HashedMessage, PreparedMessage, PublicKey, Signature,
@@ -79,53 +79,147 @@ impl AggregateSignature {
 
     /// Verifies a non-empty slice of aggregate-key/hashed-message groups.
     ///
-    /// Multiple groups may contain the same message. Each group contributes a
-    /// separate term to the pairing equation. Returns `false` for an empty
-    /// slice.
+    /// Public keys for equal hashed messages are combined and an identity sum
+    /// is rejected. Finding equal messages takes quadratic time in the worst
+    /// case but does not allocate. Returns `false` for an empty slice.
     #[must_use]
     pub fn verify_groups(&self, groups: &[(&AggregatePublicKey, &HashedMessage)]) -> bool {
-        if groups.is_empty() {
-            return false;
-        }
-
-        let mut accumulator = ffi::miller_loop_identity();
-        let mut keys = [G1Affine::default(); MILLER_LOOP_BATCH_SIZE];
-        let mut messages = [G2Affine::default(); MILLER_LOOP_BATCH_SIZE];
-
-        for chunk in groups.chunks(MILLER_LOOP_BATCH_SIZE) {
-            for (index, &(key, message)) in chunk.iter().enumerate() {
-                keys[index] = key.point;
-                messages[index] = message.point;
-            }
-
-            let term = ffi::miller_loop_many(&keys[..chunk.len()], &messages[..chunk.len()]);
-            ffi::multiply_miller_loop(&mut accumulator, &term);
-        }
-
-        ffi::verify_miller_loop_product(&accumulator, &self.point)
+        verify_group_slice(self, groups)
     }
 
     /// Verifies a non-empty slice of aggregate-key/prepared-message groups.
     ///
-    /// Multiple groups may contain the same message. Each group contributes a
-    /// separate term to the pairing equation. Returns `false` for an empty
-    /// slice.
+    /// Public keys for equal hashed messages are combined and an identity sum
+    /// is rejected. Finding equal messages takes quadratic time in the worst
+    /// case but does not allocate. Returns `false` for an empty slice.
     #[must_use]
     pub fn verify_prepared_groups(
         &self,
         groups: &[(&AggregatePublicKey, &PreparedMessage)],
     ) -> bool {
-        if groups.is_empty() {
-            return false;
+        verify_group_slice(self, groups)
+    }
+}
+
+trait PairingMessage {
+    fn hashed_message(&self) -> &HashedMessage;
+
+    fn add_pairing(&self, pairings: &mut PairingAccumulator, key: &G1Affine);
+}
+
+impl PairingMessage for HashedMessage {
+    fn hashed_message(&self) -> &HashedMessage {
+        self
+    }
+
+    fn add_pairing(&self, pairings: &mut PairingAccumulator, key: &G1Affine) {
+        pairings.add(key, &self.point);
+    }
+}
+
+impl PairingMessage for PreparedMessage {
+    fn hashed_message(&self) -> &HashedMessage {
+        self.as_hashed_message()
+    }
+
+    fn add_pairing(&self, pairings: &mut PairingAccumulator, key: &G1Affine) {
+        pairings.add_prepared(key, &self.lines);
+    }
+}
+
+fn verify_group_slice<M: PairingMessage>(
+    signature: &AggregateSignature,
+    groups: &[(&AggregatePublicKey, &M)],
+) -> bool {
+    if groups.is_empty() {
+        return false;
+    }
+
+    let mut pairings = PairingAccumulator::new();
+
+    for (index, &(key, message)) in groups.iter().enumerate() {
+        let hashed_message = message.hashed_message();
+        if groups[..index]
+            .iter()
+            .any(|&(_, previous)| previous.hashed_message() == hashed_message)
+        {
+            continue;
         }
 
-        let mut accumulator = ffi::miller_loop_identity();
-        for &(key, message) in groups {
-            let term = ffi::miller_loop_prepared(&key.point, &message.lines);
-            ffi::multiply_miller_loop(&mut accumulator, &term);
+        let mut grouped_key = None;
+        for &(next_key, next_message) in &groups[index + 1..] {
+            if next_message.hashed_message() == hashed_message {
+                let sum = grouped_key.get_or_insert_with(|| ffi::g1_from_affine(&key.point));
+                ffi::add_g1_affine(sum, &next_key.point);
+            }
         }
 
-        ffi::verify_miller_loop_product(&accumulator, &self.point)
+        if let Some(grouped_key) = grouped_key {
+            if ffi::g1_is_identity(&grouped_key) {
+                return false;
+            }
+            message.add_pairing(&mut pairings, &ffi::g1_to_affine(&grouped_key));
+        } else {
+            message.add_pairing(&mut pairings, &key.point);
+        }
+    }
+
+    pairings.verify(&signature.point)
+}
+
+struct PairingAccumulator {
+    accumulator: MillerLoopResult,
+    staged_keys: [G1Affine; MILLER_LOOP_BATCH_SIZE],
+    staged_messages: [G2Affine; MILLER_LOOP_BATCH_SIZE],
+    staged: usize,
+}
+
+impl PairingAccumulator {
+    fn new() -> Self {
+        Self {
+            accumulator: ffi::miller_loop_identity(),
+            staged_keys: [G1Affine::default(); MILLER_LOOP_BATCH_SIZE],
+            staged_messages: [G2Affine::default(); MILLER_LOOP_BATCH_SIZE],
+            staged: 0,
+        }
+    }
+
+    fn add(&mut self, key: &G1Affine, message: &G2Affine) {
+        self.staged_keys[self.staged] = *key;
+        self.staged_messages[self.staged] = *message;
+        self.staged += 1;
+
+        if self.staged == MILLER_LOOP_BATCH_SIZE {
+            self.flush();
+        }
+    }
+
+    fn add_prepared(&mut self, key: &G1Affine, message: &PreparedLines) {
+        let term = ffi::miller_loop_prepared(key, message);
+        ffi::multiply_miller_loop(&mut self.accumulator, &term);
+    }
+
+    fn verify(&mut self, signature: &G2Affine) -> bool {
+        self.flush();
+        ffi::verify_miller_loop_product(&self.accumulator, signature)
+    }
+
+    fn reset(&mut self) {
+        self.accumulator = ffi::miller_loop_identity();
+        self.staged = 0;
+    }
+
+    fn flush(&mut self) {
+        if self.staged == 0 {
+            return;
+        }
+
+        let term = ffi::miller_loop_many(
+            &self.staged_keys[..self.staged],
+            &self.staged_messages[..self.staged],
+        );
+        ffi::multiply_miller_loop(&mut self.accumulator, &term);
+        self.staged = 0;
     }
 }
 
@@ -136,10 +230,7 @@ impl AggregateSignature {
 /// [`finish_and_reset`](Self::finish_and_reset) clears the groups while
 /// retaining the hash table's allocation for reuse.
 pub struct AggregateVerifier {
-    accumulator: MillerLoopResult,
-    staged_keys: [G1Affine; MILLER_LOOP_BATCH_SIZE],
-    staged_messages: [G2Affine; MILLER_LOOP_BATCH_SIZE],
-    staged: usize,
+    pairings: PairingAccumulator,
     grouped_keys: HashMap<[u8; 96], G1Projective>,
 }
 
@@ -158,10 +249,7 @@ impl AggregateVerifier {
     #[must_use]
     pub fn with_capacity(distinct_messages: usize) -> Self {
         Self {
-            accumulator: ffi::miller_loop_identity(),
-            staged_keys: [G1Affine::default(); MILLER_LOOP_BATCH_SIZE],
-            staged_messages: [G2Affine::default(); MILLER_LOOP_BATCH_SIZE],
-            staged: 0,
+            pairings: PairingAccumulator::new(),
             grouped_keys: HashMap::with_capacity(distinct_messages),
         }
     }
@@ -169,20 +257,13 @@ impl AggregateVerifier {
     /// Adds one aggregate-key/hashed-message group.
     pub fn add(&mut self, key: &AggregatePublicKey, message: &HashedMessage) {
         self.record_group(key, message);
-        self.staged_keys[self.staged] = key.point;
-        self.staged_messages[self.staged] = message.point;
-        self.staged += 1;
-
-        if self.staged == MILLER_LOOP_BATCH_SIZE {
-            self.flush();
-        }
+        self.pairings.add(&key.point, &message.point);
     }
 
     /// Adds one aggregate-key/prepared-message group.
     pub fn add_prepared(&mut self, key: &AggregatePublicKey, message: &PreparedMessage) {
         self.record_group(key, message.as_hashed_message());
-        let term = ffi::miller_loop_prepared(&key.point, &message.lines);
-        ffi::multiply_miller_loop(&mut self.accumulator, &term);
+        self.pairings.add_prepared(&key.point, &message.lines);
     }
 
     /// Adds aggregate-key/hashed-message groups in slice order.
@@ -211,8 +292,7 @@ impl AggregateVerifier {
         {
             false
         } else {
-            self.flush();
-            ffi::verify_miller_loop_product(&self.accumulator, &signature.point)
+            self.pairings.verify(&signature.point)
         };
 
         self.reset();
@@ -228,22 +308,8 @@ impl AggregateVerifier {
     }
 
     fn reset(&mut self) {
-        self.accumulator = ffi::miller_loop_identity();
-        self.staged = 0;
+        self.pairings.reset();
         self.grouped_keys.clear();
-    }
-
-    fn flush(&mut self) {
-        if self.staged == 0 {
-            return;
-        }
-
-        let term = ffi::miller_loop_many(
-            &self.staged_keys[..self.staged],
-            &self.staged_messages[..self.staged],
-        );
-        ffi::multiply_miller_loop(&mut self.accumulator, &term);
-        self.staged = 0;
     }
 }
 
@@ -505,7 +571,7 @@ mod tests {
     }
 
     #[test]
-    fn handles_identity_aggregate_signatures_without_accepting_empty_input() {
+    fn slice_verification_rejects_identity_equal_message_key_sums() {
         let message = b"shared message";
         let (first_key, first_signature) = participant(scalar(1), message);
         let (inverse_key, inverse_signature) = participant(
@@ -520,14 +586,11 @@ mod tests {
 
         assert_eq!(signature.to_bytes()[0], 0xc0);
         assert!(signature.to_bytes()[1..].iter().all(|byte| *byte == 0));
-        assert!(signature.verify_groups(&[(&first_key, &hashed), (&inverse_key, &hashed),]));
+        assert!(!signature.verify_groups(&[(&first_key, &hashed), (&inverse_key, &hashed),]));
         assert!(
-            signature
+            !signature
                 .verify_prepared_groups(&[(&first_key, &prepared), (&inverse_key, &prepared),])
         );
-
-        let mut verifier = AggregateVerifier::new();
-        assert!(!verifier.finish_and_reset(&signature));
     }
 
     #[test]
@@ -553,7 +616,7 @@ mod tests {
     }
 
     #[test]
-    fn streaming_verification_rejects_canceling_groups_appended_to_an_honest_signature() {
+    fn group_verification_rejects_canceling_groups_appended_to_an_honest_signature() {
         let shared_message = b"attacker-selected message";
         let (first_key, _) = participant(scalar(1), shared_message);
         let (inverse_key, _) = participant(
@@ -572,7 +635,23 @@ mod tests {
             HashedMessage::new(shared_message),
             HashedMessage::new(b"honest message"),
         ];
+        let prepared = [
+            messages[0].prepare(),
+            messages[1].prepare(),
+            messages[2].prepare(),
+        ];
         let mut verifier = AggregateVerifier::new();
+
+        assert!(!signature.verify_groups(&[
+            (&keys[0], &messages[0]),
+            (&keys[1], &messages[1]),
+            (&keys[2], &messages[2]),
+        ]));
+        assert!(!signature.verify_prepared_groups(&[
+            (&keys[0], &prepared[0]),
+            (&keys[1], &prepared[1]),
+            (&keys[2], &prepared[2]),
+        ]));
 
         verifier.extend(&[
             (&keys[0], &messages[0]),
@@ -584,7 +663,7 @@ mod tests {
     }
 
     #[test]
-    fn streaming_verification_permits_a_temporary_identity() {
+    fn group_verification_permits_a_temporary_identity() {
         let message_bytes = b"shared message";
         let (first_key, first_signature) = participant(scalar(1), message_bytes);
         let (inverse_key, inverse_signature) = participant(
@@ -601,6 +680,17 @@ mod tests {
         let message = HashedMessage::new(message_bytes);
         let prepared = message.prepare();
         let mut verifier = AggregateVerifier::new();
+
+        assert!(signature.verify_groups(&[
+            (&keys[0], &message),
+            (&keys[1], &message),
+            (&keys[2], &message),
+        ]));
+        assert!(signature.verify_prepared_groups(&[
+            (&keys[0], &prepared),
+            (&keys[1], &prepared),
+            (&keys[2], &prepared),
+        ]));
 
         verifier.add(&keys[0], &message);
         verifier.add(&keys[1], &message);
@@ -627,7 +717,7 @@ mod tests {
         assert!(!verifier.finish_and_reset(&wrong_signature));
         assert_eq!(verifier.grouped_keys.capacity(), capacity);
         assert!(verifier.grouped_keys.is_empty());
-        assert_eq!(verifier.staged, 0);
+        assert_eq!(verifier.pairings.staged, 0);
 
         verifier.add_prepared(&key, &prepared);
         assert!(verifier.finish_and_reset(&signature));
