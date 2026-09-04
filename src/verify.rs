@@ -544,6 +544,35 @@ mod tests {
     }
 
     #[test]
+    fn identity_aggregate_signature_never_verifies() {
+        let message_bytes = b"message";
+        let (key, _) = participant(scalar(1), message_bytes);
+        let keys = [key];
+        let aggregate_key = AggregatePublicKey::from(key);
+        let message = HashedMessage::new(message_bytes);
+        let prepared = message.prepare();
+        let mut identity = [0; 96];
+        identity[0] = 0xc0;
+        let identity = AggregateSignature::from_bytes(&identity).unwrap();
+
+        assert!(!identity.verify_message(&aggregate_key, message_bytes));
+        assert!(!identity.verify(&aggregate_key, &message));
+        assert!(!identity.verify_prepared(&aggregate_key, &prepared));
+        assert!(!identity.verify_message_with_keys(&keys, message_bytes));
+        assert!(!identity.verify_with_keys(&keys, &message));
+        assert!(!identity.verify_prepared_with_keys(&keys, &prepared));
+        assert!(!identity.verify_groups(&[(&aggregate_key, &message)]));
+        assert!(!identity.verify_prepared_groups(&[(&aggregate_key, &prepared)]));
+
+        let mut verifier = AggregateVerifier::new(1);
+        verifier.add(&aggregate_key, &message).unwrap();
+        assert!(!verifier.finish_and_reset(&identity));
+
+        verifier.add_prepared(&aggregate_key, &prepared).unwrap();
+        assert!(!verifier.finish_and_reset(&identity));
+    }
+
+    #[test]
     fn verifies_multi_message_and_mixed_streaming_aggregates() {
         let (first_key, first_signature) = participant(scalar(1), b"one");
         let (second_key, second_signature) = participant(scalar(2), b"two");
