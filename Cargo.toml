@@ -9,6 +9,7 @@ repository = "https://github.com/efagerho/blst-simple-rs"
 
 [features]
 default = ["std", "signing"]
+dangerous = ["dangerous-proof-bypass", "secret-key-export"]
 dangerous-proof-bypass = []
 secret-key-export = ["signing"]
 std = []
