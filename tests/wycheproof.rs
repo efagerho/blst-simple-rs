@@ -1,6 +1,8 @@
+#![cfg(blst_simple_dangerous)]
+
 mod common;
 
-use blst_simple_rs::{Signature, UnverifiedPublicKey};
+use blst_simple_rs::{Signature, UnverifiedPublicKey, dangerous::assume_proof_verified};
 use common::{
     SINGLE_VERIFICATION_PATHS, decode_hex, decode_hex_array, verify_single_at_each_entry_point,
 };
@@ -99,6 +101,6 @@ fn verify_at_each_entry_point(public_key: &str, message: &str, signature: &str) 
     };
 
     // A single-signature pairing equation does not rely on proof of possession.
-    let public_key = public_key.assume_proof_verified();
+    let public_key = assume_proof_verified(public_key);
     verify_single_at_each_entry_point(&public_key, &message, &signature)
 }

@@ -41,9 +41,19 @@ jobs:
       - name: Run Clippy
         run: cargo clippy --locked --all-targets --all-features -- -D warnings
 
+      - name: Run Clippy with proof bypass
+        env:
+          RUSTFLAGS: --cfg blst_simple_dangerous
+        run: cargo clippy --locked --all-targets --all-features -- -D warnings
+
       - name: Lint documentation
         env:
           RUSTDOCFLAGS: -D warnings
+        run: cargo doc --locked --all-features --no-deps
+
+      - name: Lint proof-bypass documentation
+        env:
+          RUSTDOCFLAGS: --cfg blst_simple_dangerous -D warnings
         run: cargo doc --locked --all-features --no-deps
 
       - name: Test default features
@@ -53,4 +63,9 @@ jobs:
         run: cargo test --locked --no-default-features
 
       - name: Test all features
+        run: cargo test --locked --all-features
+
+      - name: Test proof bypass
+        env:
+          RUSTFLAGS: --cfg blst_simple_dangerous
         run: cargo test --locked --all-features

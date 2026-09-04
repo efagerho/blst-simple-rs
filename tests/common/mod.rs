@@ -1,9 +1,9 @@
-#[cfg(feature = "dangerous-proof-bypass")]
+#[cfg(blst_simple_dangerous)]
 use blst_simple_rs::{
     AggregatePublicKey, AggregateSignature, AggregateVerifier, HashedMessage, PublicKey, Signature,
 };
 
-#[cfg(feature = "dangerous-proof-bypass")]
+#[cfg(blst_simple_dangerous)]
 pub const SINGLE_VERIFICATION_PATHS: [&str; 13] = [
     "raw-message signature",
     "hashed-message signature",
@@ -24,7 +24,7 @@ pub fn decode_hex_array<const N: usize>(input: &str) -> Option<[u8; N]> {
     decode_hex(input)?.try_into().ok()
 }
 
-#[cfg(feature = "dangerous-proof-bypass")]
+#[cfg(blst_simple_dangerous)]
 pub fn verify_single_at_each_entry_point(
     key: &PublicKey,
     message: &[u8],
@@ -52,7 +52,7 @@ pub fn verify_single_at_each_entry_point(
     ]
 }
 
-#[cfg(feature = "dangerous-proof-bypass")]
+#[cfg(blst_simple_dangerous)]
 pub fn verify_fast_aggregate_at_each_entry_point(
     keys: &[PublicKey],
     message: &[u8],

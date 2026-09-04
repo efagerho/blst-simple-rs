@@ -11,14 +11,12 @@ Secret-key export is disabled by default. Enable the `secret-key-export`
 feature to make `SecretKey::to_bytes` available. Enabling it also enables
 `signing`.
 
-The `dangerous-proof-bypass` feature adds
-`UnverifiedPublicKey::assume_proof_verified`. Enabling it permits callers to
-bypass proof-of-possession verification and can make aggregate signatures
-forgeable if misused. Only use this if you understand the cryptography and
-know what you're doing.
-
-Enable the `dangerous` feature to enable both security-sensitive capabilities
-at once.
+The proof-of-possession bypass cannot be enabled through Cargo features. It is
+available only when the final build explicitly passes
+`RUSTFLAGS="--cfg blst_simple_dangerous"`. The bypass is exposed as
+`blst_simple_rs::dangerous::assume_proof_verified`; using it can make aggregate
+signatures forgeable. Only use it when a valid proof for the exact key has
+already been verified through another trusted mechanism.
 
 ## CPU features
 
