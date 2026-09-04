@@ -178,7 +178,7 @@ mod tests {
     use crate::suite::{PROOF_OF_POSSESSION_DST, SIGNATURE_DST};
     use crate::{HashedMessage, hierarchical, keygen};
 
-    fn hex<const N: usize>(input: &str) -> [u8; N] {
+    fn hex_bytes(input: &str) -> Vec<u8> {
         fn nibble(byte: u8) -> u8 {
             match byte {
                 b'0'..=b'9' => byte - b'0',
@@ -188,12 +188,16 @@ mod tests {
             }
         }
 
-        assert_eq!(input.len(), N * 2);
-        let mut output = [0; N];
-        for (byte, digits) in output.iter_mut().zip(input.as_bytes().chunks_exact(2)) {
-            *byte = (nibble(digits[0]) << 4) | nibble(digits[1]);
-        }
-        output
+        assert_eq!(input.len() % 2, 0);
+        input
+            .as_bytes()
+            .chunks_exact(2)
+            .map(|digits| (nibble(digits[0]) << 4) | nibble(digits[1]))
+            .collect()
+    }
+
+    fn hex<const N: usize>(input: &str) -> [u8; N] {
+        hex_bytes(input).try_into().unwrap()
     }
 
     #[test]
@@ -239,28 +243,61 @@ mod tests {
     }
 
     #[test]
-    fn matches_hierarchical_derivation_vector() {
-        let seed: [u8; 64] = hex(
-            "c55257c360c07c72029aebc1b53c05ed0362ada38ead3e3e9efa3708e5349553\
-             1f09a6987599d18264c1e1c92f2cf141630c7a3c4ab7c81b2f001698e7463b04",
-        );
-        let expected_master =
-            hex("0d7359d57963ab8fbbde1852dcf553fedbc31f464d80ee7d40ae683122b45070");
-        let expected_child =
-            hex("2d18bd6c14e6d15bf8b5085c9b74f3daae3b03cc2014770a599d8c1539e50f8e");
+    fn matches_hierarchical_derivation_vectors() {
+        let cases = [
+            (
+                "c55257c360c07c72029aebc1b53c05ed0362ada38ead3e3e9efa3708e5349553\
+                 1f09a6987599d18264c1e1c92f2cf141630c7a3c4ab7c81b2f001698e7463b04",
+                "0d7359d57963ab8fbbde1852dcf553fedbc31f464d80ee7d40ae683122b45070",
+                0,
+                "2d18bd6c14e6d15bf8b5085c9b74f3daae3b03cc2014770a599d8c1539e50f8e",
+            ),
+            (
+                "3141592653589793238462643383279502884197169399375105820974944592",
+                "41c9e07822b092a93fd6797396338c3ada4170cc81829fdfce6b5d34bd5e7ec7",
+                3_141_592_653,
+                "384843fad5f3d777ea39de3e47a8f999ae91f89e42bffa993d91d9782d152a0f",
+            ),
+            (
+                "0099ff991111002299dd7744ee3355bbdd8844115566cc55663355668888cc00",
+                "3cfa341ab3910a7d00d933d8f7c4fe87c91798a0397421d6b19fd5b815132e80",
+                u32::MAX,
+                "40e86285582f35b28821340f6a53b448588efa575bc4d88c32ef8567b8d9479b",
+            ),
+            (
+                "d4e56740f876aef8c010b86a40d5f56745a118d0906a34e69aec8c0db1cb8fa3",
+                "2a0e28ffa5fbbe2f8e7aad4ed94f745d6bf755c51182e119bb1694fe61d3afca",
+                42,
+                "455c0dc9fccb3395825d92a60d2672d69416be1c2578a87a7a3d3ced11ebb88d",
+            ),
+        ];
 
-        let master = hierarchical::master(&seed).unwrap();
-        assert_eq!(master.to_bytes_for_test(), expected_master);
-        assert_eq!(
-            SecretKey::from_key_material(&seed)
-                .unwrap()
-                .to_bytes_for_test(),
-            expected_master
-        );
-        assert_eq!(
-            hierarchical::child(&master, 0).to_bytes_for_test(),
-            expected_child
-        );
+        for (case_number, (seed, expected_master, child_index, expected_child)) in
+            cases.into_iter().enumerate()
+        {
+            let seed = hex_bytes(seed);
+            let expected_master = hex(expected_master);
+            let expected_child = hex(expected_child);
+            let master = hierarchical::master(&seed).unwrap();
+
+            assert_eq!(
+                master.to_bytes_for_test(),
+                expected_master,
+                "master key for test case {case_number}"
+            );
+            assert_eq!(
+                SecretKey::from_key_material(&seed)
+                    .unwrap()
+                    .to_bytes_for_test(),
+                expected_master,
+                "master-key convenience API for test case {case_number}"
+            );
+            assert_eq!(
+                hierarchical::child(&master, child_index).to_bytes_for_test(),
+                expected_child,
+                "child key for test case {case_number}"
+            );
+        }
     }
 
     #[test]
