@@ -129,6 +129,10 @@ pub fn derive(
 
 #[cfg(test)]
 mod tests {
+    extern crate std;
+
+    use std::format;
+
     use super::{KeyInfoTooLongError, MAX_KEY_INFO_LENGTH, Parameters, derive};
 
     #[test]
@@ -143,7 +147,11 @@ mod tests {
     #[test]
     fn limits_key_info_length() {
         let maximum = [0; MAX_KEY_INFO_LENGTH];
-        assert!(Parameters::new(b"salt").with_info(&maximum).is_ok());
+        let parameters = Parameters::new(b"salt").with_info(&maximum).unwrap();
+        let actual = derive(&[42; 32], parameters).unwrap();
+        let expected = blst::min_pk::SecretKey::key_gen_v5(&[42; 32], b"salt", &maximum).unwrap();
+
+        assert_eq!(actual.to_bytes(), expected.to_bytes());
 
         let excessive = [0; MAX_KEY_INFO_LENGTH + 1];
         assert_eq!(
@@ -152,6 +160,31 @@ mod tests {
                 supplied: MAX_KEY_INFO_LENGTH + 1,
                 maximum: MAX_KEY_INFO_LENGTH,
             }
+        );
+    }
+
+    #[test]
+    fn debug_reports_lengths_without_contents() {
+        let parameters = Parameters::new(b"secret salt")
+            .with_info(b"secret context")
+            .unwrap();
+
+        let debug = format!("{parameters:?}");
+
+        assert_eq!(debug, "Parameters { salt_len: 11, key_info_len: 14 }");
+        assert!(!debug.contains("secret"));
+    }
+
+    #[test]
+    fn key_info_error_reports_both_limits() {
+        let error = KeyInfoTooLongError {
+            supplied: MAX_KEY_INFO_LENGTH + 1,
+            maximum: MAX_KEY_INFO_LENGTH,
+        };
+
+        assert_eq!(
+            format!("{error}"),
+            "key info is too long (supplied 1025, maximum 1024)"
         );
     }
 }

@@ -205,6 +205,7 @@ mod tests {
     use std::vec::Vec;
 
     use super::AggregateVerifier;
+    use crate::ffi::MILLER_LOOP_BATCH_SIZE;
     use crate::suite::{PROOF_OF_POSSESSION_DST, SIGNATURE_DST};
     use crate::{
         AggregatePublicKey, AggregateSignature, AggregateSignatureBuilder, HashedMessage,
@@ -285,7 +286,9 @@ mod tests {
         assert!(!signature.verify_message(&key, b"wrong message"));
         assert!(!signature.verify(&key, &wrong_message));
         assert!(!signature.verify_prepared(&key, &wrong_prepared));
+        assert!(!signature.verify_message(&other_key, b"message"));
         assert!(!signature.verify(&other_key, &message));
+        assert!(!signature.verify_prepared(&other_key, &prepared));
     }
 
     #[test]
@@ -298,6 +301,8 @@ mod tests {
         let key = AggregatePublicKey::from_keys(&keys).unwrap();
         let message = HashedMessage::new(message_bytes);
         let prepared = message.prepare();
+        let wrong_message = HashedMessage::new(b"wrong message");
+        let wrong_prepared = wrong_message.prepare();
 
         assert!(signature.verify_message(&key, message_bytes));
         assert!(signature.verify(&key, &message));
@@ -307,9 +312,38 @@ mod tests {
         assert!(signature.verify_prepared_with_keys(&keys, &prepared));
 
         assert!(!signature.verify_message(&key, b"wrong message"));
+        assert!(!signature.verify(&key, &wrong_message));
+        assert!(!signature.verify_prepared(&key, &wrong_prepared));
+        assert!(!signature.verify_message_with_keys(&keys, b"wrong message"));
+        assert!(!signature.verify_with_keys(&keys, &wrong_message));
+        assert!(!signature.verify_prepared_with_keys(&keys, &wrong_prepared));
         assert!(!signature.verify_message_with_keys(&[], message_bytes));
         assert!(!signature.verify_with_keys(&[], &message));
         assert!(!signature.verify_prepared_with_keys(&[], &prepared));
+
+        let duplicated_keys = [first_key, first_key];
+        let duplicated_signature = aggregate_signatures(&[first_signature, first_signature]);
+        assert!(duplicated_signature.verify_message_with_keys(&duplicated_keys, message_bytes));
+    }
+
+    #[test]
+    fn verifies_one_element_aggregates() {
+        let message_bytes = b"message";
+        let (key, signature) = participant(scalar(1), message_bytes);
+        let keys = [key];
+        let aggregate_key = AggregatePublicKey::from(key);
+        let aggregate_signature = AggregateSignature::from(signature);
+        let message = HashedMessage::new(message_bytes);
+        let prepared = message.prepare();
+
+        assert!(aggregate_signature.verify_message(&aggregate_key, message_bytes));
+        assert!(aggregate_signature.verify(&aggregate_key, &message));
+        assert!(aggregate_signature.verify_prepared(&aggregate_key, &prepared));
+        assert!(aggregate_signature.verify_message_with_keys(&keys, message_bytes));
+        assert!(aggregate_signature.verify_with_keys(&keys, &message));
+        assert!(aggregate_signature.verify_prepared_with_keys(&keys, &prepared));
+        assert!(aggregate_signature.verify_groups(&[(&aggregate_key, &message)]));
+        assert!(aggregate_signature.verify_prepared_groups(&[(&aggregate_key, &prepared)]));
     }
 
     #[test]
@@ -349,6 +383,11 @@ mod tests {
             (&keys[1], &messages[0]),
             (&keys[2], &messages[2]),
         ]));
+        assert!(!signature.verify_prepared_groups(&[
+            (&keys[0], &prepared[1]),
+            (&keys[1], &prepared[0]),
+            (&keys[2], &prepared[2]),
+        ]));
         assert!(!signature.verify_groups(&[]));
         assert!(!signature.verify_prepared_groups(&[]));
 
@@ -381,14 +420,24 @@ mod tests {
             signatures.push(signature);
         }
 
-        let signature = aggregate_signatures(&signatures);
         let groups: Vec<_> = keys.iter().zip(&messages).collect();
 
-        assert!(signature.verify_groups(&groups));
+        for count in [
+            1,
+            MILLER_LOOP_BATCH_SIZE - 1,
+            MILLER_LOOP_BATCH_SIZE,
+            MILLER_LOOP_BATCH_SIZE + 1,
+            MILLER_LOOP_BATCH_SIZE * 2,
+            MILLER_LOOP_BATCH_SIZE * 2 + 1,
+        ] {
+            let signature = aggregate_signatures(&signatures[..count]);
 
-        let mut verifier = AggregateVerifier::new(&signature);
-        verifier.extend(&groups);
-        assert!(verifier.finish());
+            assert!(signature.verify_groups(&groups[..count]));
+
+            let mut verifier = AggregateVerifier::new(&signature);
+            verifier.extend(&groups[..count]);
+            assert!(verifier.finish());
+        }
     }
 
     #[test]

@@ -95,3 +95,76 @@ impl core::error::Error for ProofVerificationError {
 }
 
 impl core::error::Error for AggregateError {}
+
+#[cfg(test)]
+mod tests {
+    extern crate std;
+
+    use core::error::Error;
+
+    use std::format;
+
+    use super::{AggregateError, DecodeError, InvalidProofError, ProofVerificationError};
+
+    #[test]
+    fn displays_every_error_variant() {
+        let decode_errors = [
+            (
+                DecodeError::BadEncoding,
+                "invalid compressed point encoding",
+            ),
+            (DecodeError::NotOnCurve, "point is not on the curve"),
+            (
+                DecodeError::NotInGroup,
+                "point is not in the prime-order subgroup",
+            ),
+            (
+                DecodeError::PointAtInfinity,
+                "point at infinity is not allowed",
+            ),
+        ];
+
+        for (error, expected) in decode_errors {
+            assert_eq!(format!("{error}"), expected);
+        }
+
+        assert_eq!(
+            format!("{}", InvalidProofError),
+            "proof of possession verification failed"
+        );
+        assert_eq!(
+            format!(
+                "{}",
+                ProofVerificationError::PublicKeyDecode(DecodeError::NotOnCurve)
+            ),
+            "invalid public key: point is not on the curve"
+        );
+        assert_eq!(
+            format!(
+                "{}",
+                ProofVerificationError::ProofDecode(DecodeError::NotInGroup)
+            ),
+            "invalid proof of possession: point is not in the prime-order subgroup"
+        );
+        assert_eq!(
+            format!("{}", ProofVerificationError::InvalidProof),
+            "proof of possession verification failed"
+        );
+        assert_eq!(
+            format!("{}", AggregateError::InvalidKeyCombination),
+            "public keys form an invalid aggregate combination"
+        );
+    }
+
+    #[test]
+    fn proof_verification_errors_expose_only_decode_sources() {
+        let public_key = ProofVerificationError::PublicKeyDecode(DecodeError::BadEncoding);
+        let proof = ProofVerificationError::ProofDecode(DecodeError::NotInGroup);
+        let invalid = ProofVerificationError::from(InvalidProofError);
+
+        assert!(public_key.source().is_some());
+        assert!(proof.source().is_some());
+        assert!(invalid.source().is_none());
+        assert_eq!(invalid, ProofVerificationError::InvalidProof);
+    }
+}

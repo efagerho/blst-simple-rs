@@ -11,3 +11,25 @@ use crate::{PublicKey, UnverifiedPublicKey};
 pub fn assume_proof_verified(key: UnverifiedPublicKey) -> PublicKey {
     PublicKey { unverified: key }
 }
+
+#[cfg(test)]
+mod tests {
+    use super::assume_proof_verified;
+    use crate::UnverifiedPublicKey;
+
+    #[test]
+    fn preserves_the_admitted_key() {
+        let mut scalar = [0; 32];
+        scalar[31] = 1;
+        let bytes = blst::min_pk::SecretKey::from_bytes(&scalar)
+            .unwrap()
+            .sk_to_pk()
+            .to_bytes();
+        let unverified = UnverifiedPublicKey::from_bytes(&bytes).unwrap();
+
+        let key = assume_proof_verified(unverified);
+
+        assert_eq!(key.as_unverified(), &unverified);
+        assert_eq!(key.to_bytes(), bytes);
+    }
+}

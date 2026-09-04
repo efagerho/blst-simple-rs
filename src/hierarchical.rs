@@ -29,3 +29,22 @@ pub fn master(seed: &[u8]) -> Result<SecretKey, KeyMaterialTooShortError> {
 pub fn child(parent: &SecretKey, index: u32) -> SecretKey {
     parent.derive_hierarchical_child(index)
 }
+
+#[cfg(test)]
+mod tests {
+    use super::child;
+    use crate::SecretKey;
+
+    #[test]
+    fn derives_the_maximum_child_index() {
+        let mut scalar = [0; 32];
+        scalar[31] = 1;
+        let parent = SecretKey::from_bytes(&scalar).unwrap();
+        let upstream = blst::min_pk::SecretKey::from_bytes(&scalar).unwrap();
+
+        assert_eq!(
+            child(&parent, u32::MAX).to_bytes(),
+            upstream.derive_child_eip2333(u32::MAX).to_bytes()
+        );
+    }
+}
