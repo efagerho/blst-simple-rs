@@ -81,13 +81,10 @@ impl fmt::Display for AggregateError {
     }
 }
 
-#[cfg(feature = "std")]
 impl core::error::Error for DecodeError {}
 
-#[cfg(feature = "std")]
 impl core::error::Error for InvalidProofError {}
 
-#[cfg(feature = "std")]
 impl core::error::Error for ProofVerificationError {
     fn source(&self) -> Option<&(dyn core::error::Error + 'static)> {
         match self {
@@ -97,5 +94,4 @@ impl core::error::Error for ProofVerificationError {
     }
 }
 
-#[cfg(feature = "std")]
 impl core::error::Error for AggregateError {}
