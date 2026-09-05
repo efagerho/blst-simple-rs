@@ -6,6 +6,12 @@ rust-version = "1.85"
 license = "Apache-2.0"
 description = "Simplified BLS signatures over blst"
 repository = "https://github.com/efagerho/blst-simple-rs"
+keywords = ["bls", "blst", "cryptography", "signatures"]
+categories = ["api-bindings", "cryptography"]
+
+[package.metadata.docs.rs]
+all-features = true
+rustdoc-args = ["--cfg", "blst_simple_dangerous"]
 
 [features]
 default = ["signing"]
@@ -17,7 +23,7 @@ portable = ["blst/portable"]
 unexpected_cfgs = { level = "warn", check-cfg = ["cfg(blst_simple_dangerous)"] }
 
 [dependencies]
-blst = { version = "=0.3.17", default-features = false }
+blst = "0.3.17"
 
 [dev-dependencies]
 serde = { version = "1.0", features = ["derive"] }
