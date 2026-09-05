@@ -75,12 +75,6 @@ impl PublicKey {
     pub fn to_bytes(&self) -> [u8; 48] {
         self.unverified.to_bytes()
     }
-
-    /// Borrows the decoded key without its proof-verification capability.
-    #[must_use]
-    pub fn as_unverified(&self) -> &UnverifiedPublicKey {
-        &self.unverified
-    }
 }
 
 #[cfg(test)]
@@ -115,7 +109,7 @@ mod tests {
         assert_eq!(key.to_bytes(), key_bytes);
         assert_eq!(key, decoded_again);
         assert_eq!(verified.to_bytes(), key_bytes);
-        assert_eq!(verified.as_unverified(), &key);
+        assert_eq!(&*verified, &key);
         assert_eq!(keys.get(&verified_again), Some(&"verified"));
     }
 
@@ -177,7 +171,7 @@ mod tests {
 
         let key = crate::dangerous::assume_proof_verified(unverified);
 
-        assert_eq!(key.as_unverified(), &unverified);
+        assert_eq!(&*key, &unverified);
         assert_eq!(key.to_bytes(), bytes);
     }
 

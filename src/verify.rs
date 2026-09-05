@@ -411,30 +411,11 @@ mod tests {
 
     use super::AggregateVerifier;
     use crate::ffi::MILLER_LOOP_BATCH_SIZE;
-    use crate::suite::{PROOF_OF_POSSESSION_DST, SIGNATURE_DST};
-    use crate::test_util::hex;
+    use crate::test_util::{hex, participant, scalar};
     use crate::{
         AggregatePublicKey, AggregateSignature, AggregateSignatureBuilder, HashedMessage,
-        PublicKey, Signature, TooManyDistinctMessagesError,
+        Signature, TooManyDistinctMessagesError,
     };
-
-    fn scalar(value: u8) -> [u8; 32] {
-        let mut scalar = [0; 32];
-        scalar[31] = value;
-        scalar
-    }
-
-    fn participant(secret: [u8; 32], message: &[u8]) -> (PublicKey, Signature) {
-        let secret = blst::min_pk::SecretKey::from_bytes(&secret).unwrap();
-        let key = secret.sk_to_pk().to_bytes();
-        let proof = secret.sign(&key, PROOF_OF_POSSESSION_DST, b"").to_bytes();
-        let signature = secret.sign(message, SIGNATURE_DST, b"").to_bytes();
-
-        (
-            PublicKey::from_bytes_with_proof(&key, &proof).unwrap(),
-            Signature::from_bytes(&signature).unwrap(),
-        )
-    }
 
     fn aggregate_signatures(signatures: &[Signature]) -> AggregateSignature {
         let (first, rest) = signatures.split_first().unwrap();
