@@ -26,7 +26,7 @@ impl UnverifiedPublicKey {
     pub fn verify_proof(&self, proof: &ProofOfPossession) -> Result<PublicKey, InvalidProofError> {
         ffi::verify_proof(&self.point, &proof.point)
             .then_some(PublicKey { unverified: *self })
-            .ok_or(InvalidProofError)
+            .ok_or(InvalidProofError::VerificationFailed)
     }
 }
 
@@ -150,7 +150,10 @@ mod tests {
         let key = UnverifiedPublicKey::from_bytes(&key_bytes).unwrap();
         let proof = ProofOfPossession::from_bytes(&proof_bytes).unwrap();
 
-        assert_eq!(key.verify_proof(&proof), Err(InvalidProofError));
+        assert_eq!(
+            key.verify_proof(&proof),
+            Err(InvalidProofError::VerificationFailed)
+        );
     }
 
     #[cfg(blst_simple_dangerous)]
