@@ -2,7 +2,7 @@ mod common;
 
 use blst_simple_rs::{Signature, UnverifiedPublicKey};
 use common::{
-    SINGLE_VERIFICATION_PATHS, decode_hex, decode_hex_array, verify_single_at_each_entry_point,
+    decode_hex, decode_hex_array, failed_single_verification, verify_single_at_each_entry_point,
 };
 use serde::Deserialize;
 
@@ -74,28 +74,32 @@ fn bls_pop_signature_verification() {
             let results = verify_at_each_entry_point(&group.public_key.pk, &test.msg, &test.sig);
             let context = format!("test case {}: {}", test.id, test.comment);
 
-            for (path, actual) in SINGLE_VERIFICATION_PATHS.into_iter().zip(results) {
+            for (path, actual) in results {
                 assert_eq!(actual, expected, "{path} failed for {context}");
             }
         }
     }
 }
 
-fn verify_at_each_entry_point(public_key: &str, message: &str, signature: &str) -> [bool; 3] {
+fn verify_at_each_entry_point(
+    public_key: &str,
+    message: &str,
+    signature: &str,
+) -> [(&'static str, bool); 3] {
     let Some(public_key) = decode_hex_array(public_key) else {
-        return [false; 3];
+        return failed_single_verification();
     };
     let Some(message) = decode_hex(message) else {
-        return [false; 3];
+        return failed_single_verification();
     };
     let Some(signature) = decode_hex_array(signature) else {
-        return [false; 3];
+        return failed_single_verification();
     };
     let Ok(public_key) = UnverifiedPublicKey::from_bytes(&public_key) else {
-        return [false; 3];
+        return failed_single_verification();
     };
     let Ok(signature) = Signature::from_bytes(&signature) else {
-        return [false; 3];
+        return failed_single_verification();
     };
 
     verify_single_at_each_entry_point(&public_key, &message, &signature)

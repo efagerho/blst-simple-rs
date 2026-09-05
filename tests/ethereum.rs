@@ -13,8 +13,8 @@ use blst_simple_rs::{
 use common::decode_hex;
 use common::decode_hex_array;
 #[cfg(blst_simple_dangerous)]
-use common::{FAST_AGGREGATE_VERIFICATION_PATHS, verify_fast_aggregate_at_each_entry_point};
-use common::{SINGLE_VERIFICATION_PATHS, verify_single_at_each_entry_point};
+use common::{failed_fast_aggregate_verification, verify_fast_aggregate_at_each_entry_point};
+use common::{failed_single_verification, verify_single_at_each_entry_point};
 use serde::Deserialize;
 use serde::de::DeserializeOwned;
 
@@ -214,7 +214,7 @@ fn fast_aggregate_verification() {
         let test: TestCase<FastAggregateVerifyInput, bool> = parse(fixture);
         let results = fast_aggregate_verify_at_each_entry_point(&test.input);
 
-        for (path, actual) in FAST_AGGREGATE_VERIFICATION_PATHS.into_iter().zip(results) {
+        for (path, actual) in results {
             assert_eq!(actual, test.output, "{path}: {}", fixture.name);
         }
     }
@@ -226,7 +226,7 @@ fn verification() {
         let test: TestCase<VerifyInput, bool> = parse(fixture);
         let results = verify_at_each_entry_point(&test.input);
 
-        for (path, actual) in SINGLE_VERIFICATION_PATHS.into_iter().zip(results) {
+        for (path, actual) in results {
             assert_eq!(actual, test.output, "{path}: {}", fixture.name);
         }
     }
@@ -310,30 +310,32 @@ fn aggregate_verify_at_each_message_rung(input: &AggregateVerifyInput) -> [bool;
 }
 
 #[cfg(blst_simple_dangerous)]
-fn fast_aggregate_verify_at_each_entry_point(input: &FastAggregateVerifyInput) -> [bool; 10] {
+fn fast_aggregate_verify_at_each_entry_point(
+    input: &FastAggregateVerifyInput,
+) -> [(&'static str, bool); 10] {
     let Some(signature) = decode_aggregate_signature(&input.signature) else {
-        return [false; 10];
+        return failed_fast_aggregate_verification();
     };
     let Some(keys) = decode_public_keys(&input.pubkeys) else {
-        return [false; 10];
+        return failed_fast_aggregate_verification();
     };
     let Some(message) = decode_hex(&input.message) else {
-        return [false; 10];
+        return failed_fast_aggregate_verification();
     };
     verify_fast_aggregate_at_each_entry_point(&keys, &message, &signature)
 }
 
-fn verify_at_each_entry_point(input: &VerifyInput) -> [bool; 3] {
+fn verify_at_each_entry_point(input: &VerifyInput) -> [(&'static str, bool); 3] {
     let Some(public_key) = decode_unverified_public_key(&input.pubkey) else {
-        return [false; 3];
+        return failed_single_verification();
     };
     let Some(signature) =
         decode_hex_array(&input.signature).and_then(|bytes| Signature::from_bytes(&bytes).ok())
     else {
-        return [false; 3];
+        return failed_single_verification();
     };
     let Some(message) = decode_hex(&input.message) else {
-        return [false; 3];
+        return failed_single_verification();
     };
     verify_single_at_each_entry_point(&public_key, &message, &signature)
 }
