@@ -36,15 +36,7 @@ pub(crate) fn hash_message(message: &[u8]) -> G2Affine {
 }
 
 fn hash_to_g2(message: &[u8], dst: &[u8]) -> G2Affine {
-    let projective = hash_to_g2_projective(message, dst);
-    let mut affine = MaybeUninit::<G2Affine>::uninit();
-
-    // SAFETY: `projective` is initialized, and BLST writes one complete
-    // `G2Affine` to the properly aligned output before it is read.
-    unsafe {
-        blst::blst_p2_to_affine(affine.as_mut_ptr(), &projective);
-        affine.assume_init()
-    }
+    g2_to_affine(&hash_to_g2_projective(message, dst))
 }
 
 fn hash_to_g2_projective(message: &[u8], dst: &[u8]) -> blst::blst_p2 {
@@ -356,36 +348,21 @@ pub(crate) fn verify_miller_loop_product(product: &MillerLoopResult, signature: 
 pub(crate) fn verify_proof(public_key: &G1Affine, proof: &G2Affine) -> bool {
     let public_key_bytes = compress_g1(public_key);
     let message = hash_to_g2(&public_key_bytes, PROOF_OF_POSSESSION_DST);
-    let mut message_pairing = MaybeUninit::<blst::blst_fp12>::uninit();
-    let mut proof_pairing = MaybeUninit::<blst::blst_fp12>::uninit();
-
-    // SAFETY: The input points and BLST's static generator are initialized.
-    // Both Miller-loop calls initialize their outputs before finalverify reads
-    // them.
-    unsafe {
-        blst::blst_miller_loop(message_pairing.as_mut_ptr(), &message, public_key);
-        blst::blst_miller_loop(
-            proof_pairing.as_mut_ptr(),
-            proof,
-            blst::blst_p1_affine_generator(),
-        );
-        blst::blst_fp12_finalverify(message_pairing.as_ptr(), proof_pairing.as_ptr())
-    }
+    verify_signature(public_key, &message, proof)
 }
 
 #[cfg(feature = "signing")]
 pub(crate) fn derive_public_key(scalar: &Scalar) -> G1Affine {
     let mut projective = MaybeUninit::<blst::blst_p1>::uninit();
-    let mut affine = MaybeUninit::<G1Affine>::uninit();
 
-    // SAFETY: `scalar` is initialized and valid. BLST initializes `projective`
-    // before the conversion reads it, then initializes `affine` before Rust
-    // reads it.
-    unsafe {
+    // SAFETY: `scalar` is initialized and valid, and BLST initializes the
+    // complete projective output before Rust reads it.
+    let projective = unsafe {
         blst::blst_sk_to_pk_in_g1(projective.as_mut_ptr(), scalar);
-        blst::blst_p1_to_affine(affine.as_mut_ptr(), projective.as_ptr());
-        affine.assume_init()
-    }
+        projective.assume_init()
+    };
+
+    g1_to_affine(&projective)
 }
 
 #[cfg(feature = "signing")]
@@ -396,14 +373,7 @@ pub(crate) fn sign_message(scalar: &Scalar, message: &[u8]) -> G2Affine {
 
 #[cfg(feature = "signing")]
 pub(crate) fn sign_hashed_message(scalar: &Scalar, message: &G2Affine) -> G2Affine {
-    let mut projective = MaybeUninit::<blst::blst_p2>::uninit();
-
-    // SAFETY: `message` is initialized, and BLST initializes the complete
-    // projective output before it is passed to `sign_projective`.
-    unsafe {
-        blst::blst_p2_from_affine(projective.as_mut_ptr(), message);
-        sign_projective(scalar, &projective.assume_init())
-    }
+    sign_projective(scalar, &g2_from_affine(message))
 }
 
 #[cfg(feature = "signing")]
