@@ -123,7 +123,7 @@ impl AggregatePublicKey {
     /// sum cancels to the identity.
     pub fn from_keys(keys: &[PublicKey]) -> Result<Self, AggregateError> {
         let Some((first, rest)) = keys.split_first() else {
-            return Err(AggregateError::InvalidKeyCombination);
+            return Err(AggregateError::EmptyInput);
         };
 
         let mut builder = AggregatePublicKeyBuilder::new(first);
@@ -204,7 +204,7 @@ impl AggregatePublicKeyBuilder {
     /// Finishes the aggregate, rejecting a sum that is the identity.
     pub fn finish(self) -> Result<AggregatePublicKey, AggregateError> {
         if ffi::g1_is_identity(&self.point) {
-            return Err(AggregateError::InvalidKeyCombination);
+            return Err(AggregateError::KeysCancelToIdentity);
         }
 
         Ok(AggregatePublicKey {
@@ -415,7 +415,7 @@ mod tests {
         );
         assert_eq!(
             AggregatePublicKey::from_keys(&[]),
-            Err(AggregateError::InvalidKeyCombination)
+            Err(AggregateError::EmptyInput)
         );
     }
 
@@ -468,12 +468,12 @@ mod tests {
 
         assert_eq!(
             AggregatePublicKey::from_keys(&[generator, negative_generator]),
-            Err(AggregateError::InvalidKeyCombination)
+            Err(AggregateError::KeysCancelToIdentity)
         );
 
         let mut builder = AggregatePublicKeyBuilder::new(&generator);
         builder.add(&negative_generator);
-        assert_eq!(builder.finish(), Err(AggregateError::InvalidKeyCombination));
+        assert_eq!(builder.finish(), Err(AggregateError::KeysCancelToIdentity));
     }
 
     #[test]

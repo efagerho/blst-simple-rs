@@ -67,8 +67,10 @@ impl fmt::Display for ProofVerificationError {
 #[derive(Clone, Copy, Debug, PartialEq, Eq)]
 #[non_exhaustive]
 pub enum AggregateError {
-    /// The input is empty or its public keys cancel to the identity.
-    InvalidKeyCombination,
+    /// No public keys were supplied.
+    EmptyInput,
+    /// The supplied public keys cancel to the identity.
+    KeysCancelToIdentity,
 }
 
 /// A streaming verifier received more distinct messages than configured.
@@ -92,9 +94,8 @@ impl fmt::Display for TooManyDistinctMessagesError {
 impl fmt::Display for AggregateError {
     fn fmt(&self, f: &mut fmt::Formatter<'_>) -> fmt::Result {
         match self {
-            Self::InvalidKeyCombination => {
-                f.write_str("public keys form an invalid aggregate combination")
-            }
+            Self::EmptyInput => f.write_str("cannot aggregate an empty public-key slice"),
+            Self::KeysCancelToIdentity => f.write_str("public keys cancel to the identity"),
         }
     }
 }
@@ -172,8 +173,12 @@ mod tests {
             "proof of possession verification failed"
         );
         assert_eq!(
-            format!("{}", AggregateError::InvalidKeyCombination),
-            "public keys form an invalid aggregate combination"
+            format!("{}", AggregateError::EmptyInput),
+            "cannot aggregate an empty public-key slice"
+        );
+        assert_eq!(
+            format!("{}", AggregateError::KeysCancelToIdentity),
+            "public keys cancel to the identity"
         );
         assert_eq!(
             format!("{}", TooManyDistinctMessagesError { maximum: 4 }),
