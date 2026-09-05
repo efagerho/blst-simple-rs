@@ -20,6 +20,7 @@ mod signature;
 mod suite;
 #[cfg(test)]
 mod test_util;
+mod trait_assertions;
 mod verify;
 
 /// APIs that bypass validation enforced by the crate's safe types.
