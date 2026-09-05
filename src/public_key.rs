@@ -82,22 +82,12 @@ mod tests {
     use std::collections::HashMap;
 
     use super::{PublicKey, UnverifiedPublicKey};
-    use crate::suite::PROOF_OF_POSSESSION_DST;
+    use crate::test_util::{public_key_and_proof_bytes, scalar};
     use crate::{DecodeError, InvalidProofError, ProofOfPossession, ProofVerificationError};
-
-    fn key_and_proof(key_material: [u8; 32]) -> ([u8; 48], [u8; 96]) {
-        let secret_key =
-            blst::min_pk::SecretKey::key_gen_v5(&key_material, b"test salt", b"").unwrap();
-        let public_key = secret_key.sk_to_pk().to_bytes();
-        let proof = secret_key
-            .sign(&public_key, PROOF_OF_POSSESSION_DST, b"")
-            .to_bytes();
-        (public_key, proof)
-    }
 
     #[test]
     fn round_trips_and_verifies_a_proved_key() {
-        let (key_bytes, proof_bytes) = key_and_proof([1; 32]);
+        let (key_bytes, proof_bytes) = public_key_and_proof_bytes(scalar(1));
         let key = UnverifiedPublicKey::from_bytes(&key_bytes).unwrap();
         let decoded_again = UnverifiedPublicKey::from_bytes(&key.to_bytes()).unwrap();
         let proof = ProofOfPossession::from_bytes(&proof_bytes).unwrap();
@@ -155,8 +145,8 @@ mod tests {
 
     #[test]
     fn rejects_a_proof_for_another_key() {
-        let (key_bytes, _) = key_and_proof([1; 32]);
-        let (_, proof_bytes) = key_and_proof([2; 32]);
+        let (key_bytes, _) = public_key_and_proof_bytes(scalar(1));
+        let (_, proof_bytes) = public_key_and_proof_bytes(scalar(2));
         let key = UnverifiedPublicKey::from_bytes(&key_bytes).unwrap();
         let proof = ProofOfPossession::from_bytes(&proof_bytes).unwrap();
 
@@ -166,7 +156,7 @@ mod tests {
     #[cfg(blst_simple_dangerous)]
     #[test]
     fn proof_bypass_preserves_the_admitted_key() {
-        let (bytes, _) = key_and_proof([1; 32]);
+        let (bytes, _) = public_key_and_proof_bytes(scalar(1));
         let unverified = UnverifiedPublicKey::from_bytes(&bytes).unwrap();
 
         let key = crate::dangerous::assume_proof_verified(unverified);
@@ -177,8 +167,8 @@ mod tests {
 
     #[test]
     fn combined_constructor_preserves_error_context() {
-        let (key_bytes, proof_bytes) = key_and_proof([1; 32]);
-        let (_, wrong_proof) = key_and_proof([2; 32]);
+        let (key_bytes, proof_bytes) = public_key_and_proof_bytes(scalar(1));
+        let (_, wrong_proof) = public_key_and_proof_bytes(scalar(2));
         let bad_key = [0; 48];
         let bad_proof = [0; 96];
 

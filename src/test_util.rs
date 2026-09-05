@@ -13,8 +13,16 @@ pub(crate) fn signature(secret: [u8; 32], message: &[u8]) -> Signature {
     signature_from_secret(&decode_secret(secret), message)
 }
 
+pub(crate) fn signature_bytes(secret: [u8; 32], message: &[u8]) -> [u8; 96] {
+    signature_bytes_from_secret(&decode_secret(secret), message)
+}
+
 pub(crate) fn public_key(secret: [u8; 32]) -> PublicKey {
     public_key_from_secret(&decode_secret(secret))
+}
+
+pub(crate) fn public_key_and_proof_bytes(secret: [u8; 32]) -> ([u8; 48], [u8; 96]) {
+    public_key_and_proof_bytes_from_secret(&decode_secret(secret))
 }
 
 pub(crate) fn participant(secret: [u8; 32], message: &[u8]) -> (PublicKey, Signature) {
@@ -54,12 +62,23 @@ fn decode_secret(bytes: [u8; 32]) -> blst::min_pk::SecretKey {
 }
 
 fn signature_from_secret(secret: &blst::min_pk::SecretKey, message: &[u8]) -> Signature {
-    let bytes = secret.sign(message, SIGNATURE_DST, b"").to_bytes();
+    let bytes = signature_bytes_from_secret(secret, message);
     Signature::from_bytes(&bytes).unwrap()
 }
 
-fn public_key_from_secret(secret: &blst::min_pk::SecretKey) -> PublicKey {
+fn signature_bytes_from_secret(secret: &blst::min_pk::SecretKey, message: &[u8]) -> [u8; 96] {
+    secret.sign(message, SIGNATURE_DST, b"").to_bytes()
+}
+
+fn public_key_and_proof_bytes_from_secret(
+    secret: &blst::min_pk::SecretKey,
+) -> ([u8; 48], [u8; 96]) {
     let key = secret.sk_to_pk().to_bytes();
     let proof = secret.sign(&key, PROOF_OF_POSSESSION_DST, b"").to_bytes();
+    (key, proof)
+}
+
+fn public_key_from_secret(secret: &blst::min_pk::SecretKey) -> PublicKey {
+    let (key, proof) = public_key_and_proof_bytes_from_secret(secret);
     PublicKey::from_bytes_with_proof(&key, &proof).unwrap()
 }
