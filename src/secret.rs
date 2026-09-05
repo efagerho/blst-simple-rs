@@ -1,16 +1,21 @@
 use core::fmt;
 
 use crate::ffi::{self, Scalar};
-use crate::{HashedMessage, ProofOfPossession, PublicKey, Signature};
+use crate::{HashedMessage, KeyGenerationParameters, ProofOfPossession, PublicKey, Signature};
 
 pub(crate) const MINIMUM_KEY_MATERIAL_LENGTH: usize = 32;
+/// `SHA-256("BLS-SIG-KEYGEN-SALT-")`.
+const DEFAULT_KEYGEN_SALT: [u8; 32] = [
+    0xaf, 0xf1, 0xb7, 0x03, 0x64, 0x7f, 0xe4, 0xbd, 0x43, 0x3a, 0x89, 0x3a, 0x3d, 0x2b, 0xa5, 0x1a,
+    0xbe, 0x26, 0xef, 0x79, 0x4a, 0x83, 0x56, 0xfe, 0xa6, 0x2e, 0x8e, 0x7c, 0x7c, 0x87, 0x75, 0x46,
+];
 
 /// A secret scalar suitable for BLS signing.
 ///
 /// Use [`Self::from_key_material`] for `KeyGen` with the draft-04 compatibility
-/// salt, [`crate::keygen::derive`] for explicit parameters,
-/// [`crate::hierarchical`] for EIP-2333 derivation, or [`Self::from_bytes`] to
-/// import a scalar.
+/// salt, [`Self::from_key_material_with_parameters`] for explicit parameters,
+/// [`Self::derive_child`] for EIP-2333 child derivation, or [`Self::from_bytes`]
+/// to import a scalar.
 #[derive(Clone)]
 pub struct SecretKey {
     scalar: Scalar,
@@ -27,15 +32,33 @@ impl SecretKey {
     ///
     /// `key_material` must contain at least 32 bytes, remain secret, and be
     /// infeasible to guess. This method checks only its length. Use
-    /// [`crate::keygen::derive`] when the protocol specifies a salt or key-info.
-    /// For the same bytes, this produces the same key as
-    /// [`crate::hierarchical::master`].
+    /// [`Self::from_key_material_with_parameters`] when the protocol specifies
+    /// a salt or key-info. With empty key-info, this also implements
+    /// `derive_master_SK` from EIP-2333, *BLS12-381 Key Generation*.
     pub fn from_key_material(key_material: &[u8]) -> Result<Self, KeyMaterialTooShortError> {
         validate_key_material_length(key_material)?;
         Ok(Self::derive_key_material(
             key_material,
-            &crate::keygen::COMPATIBILITY_SALT,
+            &DEFAULT_KEYGEN_SALT,
             &[],
+        ))
+    }
+
+    /// Derives a secret key with caller-supplied `KeyGen` parameters.
+    ///
+    /// This implements `KeyGen` from *BLS Signatures*
+    /// (`draft-irtf-cfrg-bls-signature-07`) using HKDF-SHA-256 from RFC 5869.
+    /// `key_material` must contain at least 32 bytes, remain secret, and be
+    /// infeasible to guess. This method checks only its length.
+    pub fn from_key_material_with_parameters(
+        key_material: &[u8],
+        parameters: KeyGenerationParameters<'_>,
+    ) -> Result<Self, KeyMaterialTooShortError> {
+        validate_key_material_length(key_material)?;
+        Ok(Self::derive_key_material(
+            key_material,
+            parameters.salt,
+            parameters.key_info,
         ))
     }
 
@@ -87,15 +110,20 @@ impl SecretKey {
         }
     }
 
-    pub(crate) fn derive_key_material(key_material: &[u8], salt: &[u8], key_info: &[u8]) -> Self {
+    /// Derives the hardened EIP-2333 child key at `index`.
+    ///
+    /// This implements `derive_child_SK` from EIP-2333, *BLS12-381 Key
+    /// Generation*. Deriving a child requires the parent secret key.
+    #[must_use]
+    pub fn derive_child(&self, index: u32) -> Self {
         Self {
-            scalar: ffi::derive_key_material(key_material, salt, key_info),
+            scalar: ffi::derive_child(&self.scalar, index),
         }
     }
 
-    pub(crate) fn derive_hierarchical_child(&self, index: u32) -> Self {
+    fn derive_key_material(key_material: &[u8], salt: &[u8], key_info: &[u8]) -> Self {
         Self {
-            scalar: ffi::derive_hierarchical_child(&self.scalar, index),
+            scalar: ffi::derive_key_material(key_material, salt, key_info),
         }
     }
 }
@@ -172,7 +200,7 @@ mod tests {
     use super::{KeyMaterialTooShortError, SecretKey, SecretKeyError};
     use crate::suite::{PROOF_OF_POSSESSION_DST, SIGNATURE_DST};
     use crate::test_util::{hex, hex_bytes};
-    use crate::{HashedMessage, hierarchical, keygen};
+    use crate::{HashedMessage, KeyGenerationParameters};
 
     #[test]
     fn rejects_short_key_material() {
@@ -190,10 +218,13 @@ mod tests {
                 expected
             );
             assert_eq!(
-                keygen::derive(key_material, keygen::Parameters::new(b"salt")).unwrap_err(),
+                SecretKey::from_key_material_with_parameters(
+                    key_material,
+                    KeyGenerationParameters::new(b"salt"),
+                )
+                .unwrap_err(),
                 expected
             );
-            assert_eq!(hierarchical::master(key_material).unwrap_err(), expected);
         }
     }
 
@@ -217,7 +248,7 @@ mod tests {
     }
 
     #[test]
-    fn matches_hierarchical_derivation_vectors() {
+    fn matches_eip2333_derivation_vectors() {
         let cases = [
             (
                 "c55257c360c07c72029aebc1b53c05ed0362ada38ead3e3e9efa3708e5349553\
@@ -252,7 +283,7 @@ mod tests {
             let seed = hex_bytes(seed);
             let expected_master = hex(expected_master);
             let expected_child = hex(expected_child);
-            let master = hierarchical::master(&seed).unwrap();
+            let master = SecretKey::from_key_material(&seed).unwrap();
 
             assert_eq!(
                 master.to_bytes(),
@@ -260,12 +291,7 @@ mod tests {
                 "master key for test case {case_number}"
             );
             assert_eq!(
-                SecretKey::from_key_material(&seed).unwrap().to_bytes(),
-                expected_master,
-                "master-key convenience API for test case {case_number}"
-            );
-            assert_eq!(
-                hierarchical::child(&master, child_index).to_bytes(),
+                master.derive_child(child_index).to_bytes(),
                 expected_child,
                 "child key for test case {case_number}"
             );
@@ -275,11 +301,21 @@ mod tests {
     #[test]
     fn configurable_key_generation_forwards_all_parameters() {
         let key_material = [42; 32];
-        let empty = keygen::derive(&key_material, keygen::Parameters::new(b"")).unwrap();
-        let salted = keygen::derive(&key_material, keygen::Parameters::new(b"salt")).unwrap();
-        let informed = keygen::derive(
+        let empty = SecretKey::from_key_material_with_parameters(
             &key_material,
-            keygen::Parameters::new(b"").with_info(b"context").unwrap(),
+            KeyGenerationParameters::new(b""),
+        )
+        .unwrap();
+        let salted = SecretKey::from_key_material_with_parameters(
+            &key_material,
+            KeyGenerationParameters::new(b"salt"),
+        )
+        .unwrap();
+        let informed = SecretKey::from_key_material_with_parameters(
+            &key_material,
+            KeyGenerationParameters::new(b"")
+                .with_info(b"context")
+                .unwrap(),
         )
         .unwrap();
 
@@ -288,11 +324,6 @@ mod tests {
 
         assert_ne!(empty.to_bytes(), salted.to_bytes());
         assert_ne!(empty.to_bytes(), informed.to_bytes());
-
-        let simple = SecretKey::from_key_material(&key_material).unwrap();
-        let compatible =
-            keygen::derive(&key_material, keygen::Parameters::compatibility()).unwrap();
-        assert_eq!(simple.to_bytes(), compatible.to_bytes());
     }
 
     #[test]

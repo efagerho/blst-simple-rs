@@ -30,9 +30,7 @@ mod verify;
 #[cfg(blst_simple_dangerous)]
 pub mod dangerous;
 #[cfg(feature = "signing")]
-pub mod hierarchical;
-#[cfg(feature = "signing")]
-pub mod keygen;
+mod keygen;
 
 pub use aggregate::{
     AggregatePublicKey, AggregatePublicKeyBuilder, AggregateSignature, AggregateSignatureBuilder,
@@ -42,7 +40,7 @@ pub use error::{
     TooManyDistinctMessagesError,
 };
 #[cfg(feature = "signing")]
-pub use keygen::KeyInfoTooLongError;
+pub use keygen::{KeyGenerationParameters, KeyInfoTooLongError, MAX_KEY_INFO_LENGTH};
 pub use message::{HashedMessage, PreparedMessage};
 pub use proof::ProofOfPossession;
 pub use public_key::{PublicKey, UnverifiedPublicKey};
