@@ -354,10 +354,7 @@ mod tests {
             .to_bytes();
 
         assert_eq!(proof.to_bytes(), expected);
-        assert_eq!(
-            public_key.as_unverified().verify_proof(&proof).unwrap(),
-            public_key
-        );
+        assert_eq!(public_key.verify_proof(&proof).unwrap(), public_key);
     }
 
     #[test]
@@ -375,10 +372,7 @@ mod tests {
         let public_key = secret_key.public_key();
 
         assert_eq!(proof.to_bytes(), expected);
-        assert_eq!(
-            public_key.as_unverified().verify_proof(&proof),
-            Ok(public_key)
-        );
+        assert_eq!(public_key.verify_proof(&proof), Ok(public_key));
     }
 
     #[test]
