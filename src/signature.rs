@@ -34,18 +34,11 @@ mod tests {
 
     use super::Signature;
     use crate::DecodeError;
-    use crate::suite::SIGNATURE_DST;
-
-    fn signature_bytes() -> [u8; 96] {
-        blst::min_pk::SecretKey::key_gen_v5(&[1; 32], b"test salt", b"")
-            .unwrap()
-            .sign(b"message", SIGNATURE_DST, b"")
-            .to_bytes()
-    }
+    use crate::test_util::{scalar, signature_bytes};
 
     #[test]
     fn round_trips_a_valid_signature() {
-        let bytes = signature_bytes();
+        let bytes = signature_bytes(scalar(1), b"message");
         let signature = Signature::from_bytes(&bytes).unwrap();
         let decoded_again = Signature::from_bytes(&signature.to_bytes()).unwrap();
         let mut signatures = HashMap::new();
