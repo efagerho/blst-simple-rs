@@ -688,6 +688,45 @@ mod tests {
     }
 
     #[test]
+    fn streaming_grouping_survives_a_pairing_flush() {
+        let shared_message = b"shared message";
+        let (first_key, first_signature) = participant(scalar(1), shared_message);
+        let (inverse_key, inverse_signature) = participant(
+            hex("73eda753299d7d483339d80809a1d80553bda402fffe5bfeffffffff00000000"),
+            shared_message,
+        );
+        let shared_message = HashedMessage::new(shared_message);
+        let mut signatures = vec![first_signature];
+        let mut verifier = AggregateVerifier::new(MILLER_LOOP_BATCH_SIZE);
+
+        verifier
+            .add(&AggregatePublicKey::from(first_key), &shared_message)
+            .unwrap();
+
+        for value in 2..=MILLER_LOOP_BATCH_SIZE as u8 {
+            let message_bytes = [value];
+            let (key, signature) = participant(scalar(value), &message_bytes);
+            verifier
+                .add(
+                    &AggregatePublicKey::from(key),
+                    &HashedMessage::new(&message_bytes),
+                )
+                .unwrap();
+            signatures.push(signature);
+        }
+
+        assert_eq!(verifier.pairings.staged, 0);
+
+        verifier
+            .add(&AggregatePublicKey::from(inverse_key), &shared_message)
+            .unwrap();
+        signatures.push(inverse_signature);
+
+        assert_eq!(verifier.grouped_keys.len(), MILLER_LOOP_BATCH_SIZE);
+        assert!(!verifier.finish_and_reset(&aggregate_signatures(&signatures)));
+    }
+
+    #[test]
     fn group_verification_rejects_canceling_groups_appended_to_an_honest_signature() {
         let shared_message = b"attacker-selected message";
         let (first_key, _) = participant(scalar(1), shared_message);
