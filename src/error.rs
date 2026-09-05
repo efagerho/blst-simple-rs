@@ -27,11 +27,17 @@ impl fmt::Display for DecodeError {
 
 /// A decoded proof of possession that did not verify for its public key.
 #[derive(Clone, Copy, Debug, PartialEq, Eq)]
-pub struct InvalidProofError;
+#[non_exhaustive]
+pub enum InvalidProofError {
+    /// The proof did not verify for its public key.
+    VerificationFailed,
+}
 
 impl fmt::Display for InvalidProofError {
     fn fmt(&self, f: &mut fmt::Formatter<'_>) -> fmt::Result {
-        f.write_str("proof of possession verification failed")
+        match self {
+            Self::VerificationFailed => f.write_str("proof of possession verification failed"),
+        }
     }
 }
 
@@ -73,6 +79,15 @@ pub enum AggregateError {
     KeysCancelToIdentity,
 }
 
+impl fmt::Display for AggregateError {
+    fn fmt(&self, f: &mut fmt::Formatter<'_>) -> fmt::Result {
+        match self {
+            Self::EmptyInput => f.write_str("cannot aggregate an empty public-key slice"),
+            Self::KeysCancelToIdentity => f.write_str("public keys cancel to the identity"),
+        }
+    }
+}
+
 /// A streaming verifier received more distinct messages than configured.
 #[derive(Clone, Copy, Debug, PartialEq, Eq)]
 #[non_exhaustive]
@@ -88,15 +103,6 @@ impl fmt::Display for TooManyDistinctMessagesError {
             "distinct message limit exceeded (maximum {})",
             self.maximum
         )
-    }
-}
-
-impl fmt::Display for AggregateError {
-    fn fmt(&self, f: &mut fmt::Formatter<'_>) -> fmt::Result {
-        match self {
-            Self::EmptyInput => f.write_str("cannot aggregate an empty public-key slice"),
-            Self::KeysCancelToIdentity => f.write_str("public keys cancel to the identity"),
-        }
     }
 }
 
@@ -151,7 +157,7 @@ mod tests {
         }
 
         assert_eq!(
-            format!("{}", InvalidProofError),
+            format!("{}", InvalidProofError::VerificationFailed),
             "proof of possession verification failed"
         );
         assert_eq!(
@@ -190,7 +196,7 @@ mod tests {
     fn proof_verification_errors_expose_only_decode_sources() {
         let public_key = ProofVerificationError::PublicKeyDecode(DecodeError::BadEncoding);
         let proof = ProofVerificationError::ProofDecode(DecodeError::NotInGroup);
-        let invalid = ProofVerificationError::from(InvalidProofError);
+        let invalid = ProofVerificationError::from(InvalidProofError::VerificationFailed);
 
         assert!(public_key.source().is_some());
         assert!(proof.source().is_some());
