@@ -28,13 +28,16 @@ const _: fn() = || {
 
 #[cfg(feature = "signing")]
 const _: fn() = || {
-    use crate::{KeyInfoTooLongError, KeyMaterialTooShortError, SecretKey, SecretKeyError, keygen};
+    use crate::{
+        KeyGenerationParameters, KeyInfoTooLongError, KeyMaterialTooShortError, SecretKey,
+        SecretKeyError,
+    };
 
     fn assert_send_sync<T: Send + Sync>() {}
 
     assert_send_sync::<KeyInfoTooLongError>();
     assert_send_sync::<KeyMaterialTooShortError>();
-    assert_send_sync::<keygen::Parameters<'static>>();
+    assert_send_sync::<KeyGenerationParameters<'static>>();
     assert_send_sync::<SecretKey>();
     assert_send_sync::<SecretKeyError>();
 };

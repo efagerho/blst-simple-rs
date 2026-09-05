@@ -451,7 +451,7 @@ pub(crate) fn derive_key_material(key_material: &[u8], salt: &[u8], key_info: &[
 }
 
 #[cfg(feature = "signing")]
-pub(crate) fn derive_hierarchical_child(parent: &Scalar, index: u32) -> Scalar {
+pub(crate) fn derive_child(parent: &Scalar, index: u32) -> Scalar {
     let mut scalar = MaybeUninit::<Scalar>::uninit();
 
     // SAFETY: `parent` is an initialized valid scalar, and BLST initializes
