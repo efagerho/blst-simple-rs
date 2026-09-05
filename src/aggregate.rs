@@ -222,9 +222,7 @@ impl fmt::Debug for AggregatePublicKeyBuilder {
 
 #[cfg(test)]
 mod tests {
-    use core::hash::{Hash, Hasher};
-
-    use std::collections::hash_map::DefaultHasher;
+    use std::collections::HashMap;
     use std::format;
     use std::vec::Vec;
 
@@ -260,12 +258,6 @@ mod tests {
             .unwrap()
             .to_public_key()
             .to_bytes()
-    }
-
-    fn hash<T: Hash>(value: &T) -> u64 {
-        let mut hasher = DefaultHasher::new();
-        value.hash(&mut hasher);
-        hasher.finish()
     }
 
     #[test]
@@ -350,13 +342,15 @@ mod tests {
         builder.add(&second);
         let aggregate = builder.finish();
         let decoded = AggregateSignature::from_bytes(&aggregate.to_bytes()).unwrap();
+        let mut aggregates = HashMap::new();
+        aggregates.insert(aggregate, "valid");
 
         let mut identity = [0; 96];
         identity[0] = 0xc0;
         let identity = AggregateSignature::from_bytes(&identity).unwrap();
 
         assert_eq!(decoded, aggregate);
-        assert_eq!(hash(&decoded), hash(&aggregate));
+        assert_eq!(aggregates.get(&decoded), Some(&"valid"));
         assert_eq!(identity.to_bytes()[0], 0xc0);
         assert!(identity.to_bytes()[1..].iter().all(|byte| *byte == 0));
         assert_eq!(
@@ -443,9 +437,11 @@ mod tests {
 
         let mut extended = AggregatePublicKeyBuilder::from_aggregate(&left);
         extended.extend_aggregates(&[right]);
+        let mut aggregates = HashMap::new();
+        aggregates.insert(expected, "expected");
 
         assert_eq!(combined, expected);
-        assert_eq!(hash(&combined), hash(&expected));
+        assert_eq!(aggregates.get(&combined), Some(&"expected"));
         assert_eq!(extended.finish().unwrap(), expected);
     }
 
