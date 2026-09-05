@@ -406,8 +406,6 @@ impl fmt::Debug for AggregateVerifier {
 
 #[cfg(test)]
 mod tests {
-    extern crate std;
-
     use std::format;
     use std::vec::Vec;
 
