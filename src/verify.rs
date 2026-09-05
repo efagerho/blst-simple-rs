@@ -238,7 +238,7 @@ impl PairingAccumulator {
 /// for reuse.
 pub struct AggregateVerifier {
     pairings: PairingAccumulator,
-    grouped_keys: HashMap<[u8; 96], G1Projective>,
+    grouped_keys: HashMap<HashedMessage, G1Projective>,
     maximum_distinct_messages: usize,
     overflowed: bool,
 }
@@ -369,13 +369,12 @@ impl AggregateVerifier {
             return Err(self.limit_error());
         }
 
-        let message = ffi::compress_g2(&message.point);
         let at_limit = self.grouped_keys.len() >= self.maximum_distinct_messages;
         let limit_error = TooManyDistinctMessagesError {
             maximum: self.maximum_distinct_messages,
         };
 
-        match self.grouped_keys.entry(message) {
+        match self.grouped_keys.entry(*message) {
             Entry::Occupied(mut entry) => {
                 ffi::add_g1_affine(entry.get_mut(), &key.point);
                 Ok(())
