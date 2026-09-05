@@ -258,8 +258,9 @@ pub(crate) fn verify_prepared_signature(
 pub(crate) fn miller_loop(key: &G1Affine, message: &G2Affine) -> MillerLoopResult {
     let mut result = MaybeUninit::<MillerLoopResult>::uninit();
 
-    // SAFETY: Both input points are initialized, and BLST writes one complete
-    // Miller-loop result to the properly aligned output before it is read.
+    // SAFETY: Both input points are initialized. The single-point primitive
+    // accepts identity points and writes one complete Miller-loop result to
+    // the properly aligned output before it is read.
     unsafe {
         blst::blst_miller_loop(result.as_mut_ptr(), message, key);
         result.assume_init()
@@ -342,21 +343,10 @@ pub(crate) fn multiply_miller_loop(accumulator: &mut MillerLoopResult, term: &Mi
 }
 
 pub(crate) fn verify_miller_loop_product(product: &MillerLoopResult, signature: &G2Affine) -> bool {
-    let signature = if g2_is_identity(signature) {
-        miller_loop_identity()
-    } else {
-        // SAFETY: `signature` and BLST's static generator are initialized.
-        // BLST writes one complete Miller-loop result before it is read.
-        unsafe {
-            let mut result = MaybeUninit::<MillerLoopResult>::uninit();
-            blst::blst_miller_loop(
-                result.as_mut_ptr(),
-                signature,
-                blst::blst_p1_affine_generator(),
-            );
-            result.assume_init()
-        }
-    };
+    // SAFETY: BLST returns a non-null pointer to a static, initialized affine
+    // generator.
+    let generator = unsafe { &*blst::blst_p1_affine_generator() };
+    let signature = miller_loop(generator, signature);
 
     // SAFETY: Both Miller-loop results are initialized and remain valid for
     // this read-only comparison.
@@ -525,7 +515,8 @@ mod tests {
 
     use super::{
         G1Affine, G1Projective, G2Affine, G2Projective, MILLER_LOOP_BATCH_SIZE, MillerLoopResult,
-        PreparedLines, compress_g2, decode_status, hash_to_g2, miller_loop_many,
+        PreparedLines, compress_g2, decode_g2, decode_status, hash_to_g2, miller_loop,
+        miller_loop_identity, miller_loop_many,
     };
     use crate::DecodeError;
     use crate::suite::SIGNATURE_DST;
@@ -618,6 +609,19 @@ mod tests {
                 secret.sign(message, dst, b"").to_bytes()
             );
         }
+    }
+
+    #[test]
+    fn single_miller_loop_maps_identity_to_gt_identity() {
+        let mut encoded_identity = [0; 96];
+        encoded_identity[0] = 0xc0;
+        let identity = decode_g2(&encoded_identity).unwrap();
+
+        // SAFETY: BLST returns a non-null pointer to a static, initialized
+        // affine generator.
+        let generator = unsafe { &*blst::blst_p1_affine_generator() };
+
+        assert_eq!(miller_loop(generator, &identity), miller_loop_identity());
     }
 
     #[test]
