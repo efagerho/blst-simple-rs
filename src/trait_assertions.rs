@@ -31,13 +31,10 @@ const _: fn() = || {
     use crate::{KeyInfoTooLongError, KeyMaterialTooShortError, SecretKey, SecretKeyError, keygen};
 
     fn assert_send_sync<T: Send + Sync>() {}
-    fn assert_parameters<'a>(_: &'a [u8]) {
-        assert_send_sync::<keygen::Parameters<'a>>();
-    }
 
     assert_send_sync::<KeyInfoTooLongError>();
     assert_send_sync::<KeyMaterialTooShortError>();
+    assert_send_sync::<keygen::Parameters<'static>>();
     assert_send_sync::<SecretKey>();
     assert_send_sync::<SecretKeyError>();
-    assert_parameters(&[]);
 };
