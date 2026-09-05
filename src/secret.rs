@@ -48,7 +48,9 @@ impl SecretKey {
 
     /// Exports this scalar as 32 big-endian bytes.
     ///
-    /// The caller is responsible for erasing the returned bytes.
+    /// Dropping the key overwrites its owned scalar storage, but moves and
+    /// compiler-generated temporaries may leave copies elsewhere. The caller
+    /// is responsible for erasing the returned bytes.
     #[cfg(feature = "secret-key-export")]
     #[must_use]
     pub fn to_bytes(&self) -> [u8; 32] {
