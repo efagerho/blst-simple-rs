@@ -30,18 +30,10 @@ impl Hash for ProofOfPossession {
 
 #[cfg(test)]
 mod tests {
-    use core::hash::{Hash, Hasher};
-
-    use std::collections::hash_map::DefaultHasher;
+    use std::collections::HashMap;
 
     use super::ProofOfPossession;
     use crate::{DecodeError, HashedMessage, ffi};
-
-    fn hash(proof: &ProofOfPossession) -> u64 {
-        let mut hasher = DefaultHasher::new();
-        proof.hash(&mut hasher);
-        hasher.finish()
-    }
 
     #[test]
     fn round_trips_a_valid_group_element() {
@@ -49,10 +41,12 @@ mod tests {
         let bytes = ffi::compress_g2(&point.point);
         let proof = ProofOfPossession::from_bytes(&bytes).unwrap();
         let decoded_again = ProofOfPossession::from_bytes(&proof.to_bytes()).unwrap();
+        let mut proofs = HashMap::new();
+        proofs.insert(proof, "valid");
 
         assert_eq!(proof.to_bytes(), bytes);
         assert_eq!(proof, decoded_again);
-        assert_eq!(hash(&proof), hash(&decoded_again));
+        assert_eq!(proofs.get(&decoded_again), Some(&"valid"));
     }
 
     #[test]
