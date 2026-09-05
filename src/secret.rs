@@ -51,7 +51,7 @@ impl SecretKey {
     /// Dropping the key overwrites its owned scalar storage, but moves and
     /// compiler-generated temporaries may leave copies elsewhere. The caller
     /// is responsible for erasing the returned bytes.
-    #[cfg(feature = "secret-key-export")]
+    #[cfg(any(feature = "secret-key-export", test))]
     #[must_use]
     pub fn to_bytes(&self) -> [u8; 32] {
         ffi::encode_scalar(&self.scalar)
@@ -97,13 +97,6 @@ impl SecretKey {
         Self {
             scalar: ffi::derive_hierarchical_child(&self.scalar, index),
         }
-    }
-}
-
-#[cfg(test)]
-impl SecretKey {
-    pub(crate) fn to_bytes_for_test(&self) -> [u8; 32] {
-        ffi::encode_scalar(&self.scalar)
     }
 }
 
@@ -220,7 +213,7 @@ mod tests {
         ));
 
         let secret_key = SecretKey::from_bytes(&largest_valid).unwrap();
-        assert_eq!(secret_key.to_bytes_for_test(), largest_valid);
+        assert_eq!(secret_key.to_bytes(), largest_valid);
     }
 
     #[test]
@@ -262,19 +255,17 @@ mod tests {
             let master = hierarchical::master(&seed).unwrap();
 
             assert_eq!(
-                master.to_bytes_for_test(),
+                master.to_bytes(),
                 expected_master,
                 "master key for test case {case_number}"
             );
             assert_eq!(
-                SecretKey::from_key_material(&seed)
-                    .unwrap()
-                    .to_bytes_for_test(),
+                SecretKey::from_key_material(&seed).unwrap().to_bytes(),
                 expected_master,
                 "master-key convenience API for test case {case_number}"
             );
             assert_eq!(
-                hierarchical::child(&master, child_index).to_bytes_for_test(),
+                hierarchical::child(&master, child_index).to_bytes(),
                 expected_child,
                 "child key for test case {case_number}"
             );
@@ -293,15 +284,15 @@ mod tests {
         .unwrap();
 
         let upstream = blst::min_pk::SecretKey::key_gen_v5(&key_material, b"", b"context").unwrap();
-        assert_eq!(informed.to_bytes_for_test(), upstream.to_bytes());
+        assert_eq!(informed.to_bytes(), upstream.to_bytes());
 
-        assert_ne!(empty.to_bytes_for_test(), salted.to_bytes_for_test());
-        assert_ne!(empty.to_bytes_for_test(), informed.to_bytes_for_test());
+        assert_ne!(empty.to_bytes(), salted.to_bytes());
+        assert_ne!(empty.to_bytes(), informed.to_bytes());
 
         let simple = SecretKey::from_key_material(&key_material).unwrap();
         let compatible =
             keygen::derive(&key_material, keygen::Parameters::compatibility()).unwrap();
-        assert_eq!(simple.to_bytes_for_test(), compatible.to_bytes_for_test());
+        assert_eq!(simple.to_bytes(), compatible.to_bytes());
     }
 
     #[test]
