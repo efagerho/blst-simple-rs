@@ -75,9 +75,7 @@ impl fmt::Debug for PreparedMessage {
 
 #[cfg(test)]
 mod tests {
-    use core::hash::{Hash, Hasher};
-
-    use std::collections::hash_map::DefaultHasher;
+    use std::collections::HashMap;
     use std::format;
 
     use super::{HashedMessage, PreparedMessage};
@@ -101,12 +99,6 @@ mod tests {
         signature: String,
     }
 
-    fn hash(message: &HashedMessage) -> u64 {
-        let mut hasher = DefaultHasher::new();
-        message.hash(&mut hasher);
-        hasher.finish()
-    }
-
     #[test]
     fn hashes_empty_and_binary_messages() {
         let empty = HashedMessage::new(b"");
@@ -117,14 +109,17 @@ mod tests {
     }
 
     #[test]
-    fn equal_messages_compare_and_hash_equally() {
+    fn equal_messages_work_as_hash_map_keys() {
         let first = HashedMessage::new(b"same message");
         let second = HashedMessage::new(b"same message");
         let different = HashedMessage::new(b"different message");
+        let mut messages = HashMap::new();
+        messages.insert(first, "same");
 
         assert_eq!(first, second);
-        assert_eq!(hash(&first), hash(&second));
         assert_ne!(first, different);
+        assert_eq!(messages.get(&second), Some(&"same"));
+        assert_eq!(messages.get(&different), None);
     }
 
     #[test]

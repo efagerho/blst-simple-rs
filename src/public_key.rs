@@ -85,9 +85,7 @@ impl PublicKey {
 
 #[cfg(test)]
 mod tests {
-    use core::hash::{Hash, Hasher};
-
-    use std::collections::hash_map::DefaultHasher;
+    use std::collections::HashMap;
 
     use super::{PublicKey, UnverifiedPublicKey};
     use crate::suite::PROOF_OF_POSSESSION_DST;
@@ -103,12 +101,6 @@ mod tests {
         (public_key, proof)
     }
 
-    fn hash(key: &UnverifiedPublicKey) -> u64 {
-        let mut hasher = DefaultHasher::new();
-        key.hash(&mut hasher);
-        hasher.finish()
-    }
-
     #[test]
     fn round_trips_and_verifies_a_proved_key() {
         let (key_bytes, proof_bytes) = key_and_proof([1; 32]);
@@ -116,12 +108,15 @@ mod tests {
         let decoded_again = UnverifiedPublicKey::from_bytes(&key.to_bytes()).unwrap();
         let proof = ProofOfPossession::from_bytes(&proof_bytes).unwrap();
         let verified = key.verify_proof(&proof).unwrap();
+        let verified_again = decoded_again.verify_proof(&proof).unwrap();
+        let mut keys = HashMap::new();
+        keys.insert(verified, "verified");
 
         assert_eq!(key.to_bytes(), key_bytes);
         assert_eq!(key, decoded_again);
-        assert_eq!(hash(&key), hash(&decoded_again));
         assert_eq!(verified.to_bytes(), key_bytes);
         assert_eq!(verified.as_unverified(), &key);
+        assert_eq!(keys.get(&verified_again), Some(&"verified"));
     }
 
     #[test]
