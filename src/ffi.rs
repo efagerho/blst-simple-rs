@@ -521,12 +521,60 @@ pub(crate) fn zeroize_scalar(scalar: &mut Scalar) {
 
 #[cfg(test)]
 mod tests {
+    use core::mem::size_of;
+
     use super::{
-        G1Affine, G2Affine, MILLER_LOOP_BATCH_SIZE, compress_g2, decode_status, hash_to_g2,
-        miller_loop_many,
+        G1Affine, G1Projective, G2Affine, G2Projective, MILLER_LOOP_BATCH_SIZE, MillerLoopResult,
+        PreparedLines, compress_g2, decode_status, hash_to_g2, miller_loop_many,
     };
     use crate::DecodeError;
     use crate::suite::SIGNATURE_DST;
+
+    #[test]
+    fn rust_types_match_blst_struct_sizes() {
+        // SAFETY: These functions take no arguments and only return structure
+        // sizes from the linked BLST library.
+        let (g1, g1_affine, g2, g2_affine, fp12) = unsafe {
+            (
+                blst::blst_p1_sizeof(),
+                blst::blst_p1_affine_sizeof(),
+                blst::blst_p2_sizeof(),
+                blst::blst_p2_affine_sizeof(),
+                blst::blst_fp12_sizeof(),
+            )
+        };
+
+        assert_eq!(
+            size_of::<G1Projective>(),
+            g1,
+            "G1 projective size differs from BLST"
+        );
+        assert_eq!(
+            size_of::<G1Affine>(),
+            g1_affine,
+            "G1 affine size differs from BLST"
+        );
+        assert_eq!(
+            size_of::<G2Projective>(),
+            g2,
+            "G2 projective size differs from BLST"
+        );
+        assert_eq!(
+            size_of::<G2Affine>(),
+            g2_affine,
+            "G2 affine size differs from BLST"
+        );
+        assert_eq!(
+            size_of::<MillerLoopResult>(),
+            fp12,
+            "Fp12 size differs from BLST"
+        );
+        assert_eq!(
+            size_of::<PreparedLines>(),
+            fp12 * 34,
+            "prepared line table size differs from 68 BLST Fp6 values"
+        );
+    }
 
     #[test]
     fn maps_every_blst_decode_status() {

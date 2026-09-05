@@ -30,9 +30,7 @@ impl Hash for Signature {
 
 #[cfg(test)]
 mod tests {
-    use core::hash::{Hash, Hasher};
-
-    use std::collections::hash_map::DefaultHasher;
+    use std::collections::HashMap;
 
     use super::Signature;
     use crate::DecodeError;
@@ -45,21 +43,17 @@ mod tests {
             .to_bytes()
     }
 
-    fn hash(signature: &Signature) -> u64 {
-        let mut hasher = DefaultHasher::new();
-        signature.hash(&mut hasher);
-        hasher.finish()
-    }
-
     #[test]
     fn round_trips_a_valid_signature() {
         let bytes = signature_bytes();
         let signature = Signature::from_bytes(&bytes).unwrap();
         let decoded_again = Signature::from_bytes(&signature.to_bytes()).unwrap();
+        let mut signatures = HashMap::new();
+        signatures.insert(signature, "valid");
 
         assert_eq!(signature.to_bytes(), bytes);
         assert_eq!(signature, decoded_again);
-        assert_eq!(hash(&signature), hash(&decoded_again));
+        assert_eq!(signatures.get(&decoded_again), Some(&"valid"));
     }
 
     #[test]
