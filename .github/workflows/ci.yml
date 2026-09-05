@@ -20,7 +20,7 @@ jobs:
         uses: dtolnay/rust-toolchain@1.85.0
 
       - name: Check all features
-        run: cargo check --locked --all-features
+        run: cargo check --locked --all-targets --all-features
 
   checks:
     name: Rust checks (x86-64)
@@ -65,7 +65,24 @@ jobs:
       - name: Test all features
         run: cargo test --locked --all-features
 
+      - name: Test portable build
+        run: cargo test --locked --features portable
+
       - name: Test proof bypass
         env:
           RUSTFLAGS: --cfg blst_simple_dangerous
+        run: cargo test --locked --all-features
+
+  macos:
+    name: Rust tests (macOS arm64)
+    runs-on: macos-14
+
+    steps:
+      - name: Check out repository
+        uses: actions/checkout@v6
+
+      - name: Install Rust
+        uses: dtolnay/rust-toolchain@stable
+
+      - name: Test all features
         run: cargo test --locked --all-features
