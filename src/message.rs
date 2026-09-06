@@ -1,5 +1,6 @@
 use core::fmt;
 use core::hash::{Hash, Hasher};
+use std::sync::Arc;
 
 use crate::ffi::{self, G2Affine, PreparedLines};
 
@@ -42,10 +43,12 @@ impl Hash for HashedMessage {
 /// A hashed message with heap-backed reusable Miller-loop line coefficients.
 ///
 /// This type does not implement `Clone`. Its line table is approximately 19
-/// KiB and heap-backed.
+/// KiB and shared with any [`crate::AggregateVerifier`] that retains it for
+/// deferred verification. The table is freed when the message and all such
+/// verifiers release it.
 pub struct PreparedMessage {
     hashed_message: HashedMessage,
-    pub(crate) lines: Box<PreparedLines>,
+    pub(crate) lines: Arc<PreparedLines>,
 }
 
 impl PreparedMessage {
