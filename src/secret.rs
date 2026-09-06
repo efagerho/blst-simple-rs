@@ -3,12 +3,7 @@ use core::fmt;
 use crate::ffi::{self, Scalar};
 use crate::{HashedMessage, KeyGenerationParameters, ProofOfPossession, PublicKey, Signature};
 
-pub(crate) const MINIMUM_KEY_MATERIAL_LENGTH: usize = 32;
-/// `SHA-256("BLS-SIG-KEYGEN-SALT-")`.
-const DEFAULT_KEYGEN_SALT: [u8; 32] = [
-    0xaf, 0xf1, 0xb7, 0x03, 0x64, 0x7f, 0xe4, 0xbd, 0x43, 0x3a, 0x89, 0x3a, 0x3d, 0x2b, 0xa5, 0x1a,
-    0xbe, 0x26, 0xef, 0x79, 0x4a, 0x83, 0x56, 0xfe, 0xa6, 0x2e, 0x8e, 0x7c, 0x7c, 0x87, 0x75, 0x46,
-];
+const MINIMUM_KEY_MATERIAL_LENGTH: usize = 32;
 
 // `SecretKey` relies on BLST's `zeroize(drop)` implementation for `Scalar`.
 // Fail compilation if an upgraded BLST version removes that destructor so the
@@ -41,12 +36,10 @@ impl SecretKey {
     /// a salt or key-info. With empty key-info, this also implements
     /// `derive_master_SK` from EIP-2333, *BLS12-381 Key Generation*.
     pub fn from_key_material(key_material: &[u8]) -> Result<Self, KeyMaterialTooShortError> {
-        validate_key_material_length(key_material)?;
-        Ok(Self::derive_key_material(
+        Self::from_key_material_with_parameters(
             key_material,
-            &DEFAULT_KEYGEN_SALT,
-            &[],
-        ))
+            KeyGenerationParameters::compatibility(),
+        )
     }
 
     /// Derives a secret key with caller-supplied `KeyGen` parameters.
@@ -60,11 +53,9 @@ impl SecretKey {
         parameters: KeyGenerationParameters<'_>,
     ) -> Result<Self, KeyMaterialTooShortError> {
         validate_key_material_length(key_material)?;
-        Ok(Self::derive_key_material(
-            key_material,
-            parameters.salt,
-            parameters.key_info,
-        ))
+        Ok(Self {
+            scalar: ffi::derive_key_material(key_material, parameters.salt, parameters.key_info),
+        })
     }
 
     /// Imports a canonical, nonzero big-endian scalar.
@@ -125,12 +116,6 @@ impl SecretKey {
             scalar: ffi::derive_child(&self.scalar, index),
         }
     }
-
-    fn derive_key_material(key_material: &[u8], salt: &[u8], key_info: &[u8]) -> Self {
-        Self {
-            scalar: ffi::derive_key_material(key_material, salt, key_info),
-        }
-    }
 }
 
 impl fmt::Debug for SecretKey {
@@ -179,7 +164,7 @@ impl core::error::Error for SecretKeyError {}
 
 impl core::error::Error for KeyMaterialTooShortError {}
 
-pub(crate) fn validate_key_material_length(bytes: &[u8]) -> Result<(), KeyMaterialTooShortError> {
+fn validate_key_material_length(bytes: &[u8]) -> Result<(), KeyMaterialTooShortError> {
     if bytes.len() < MINIMUM_KEY_MATERIAL_LENGTH {
         Err(KeyMaterialTooShortError {
             supplied: bytes.len(),

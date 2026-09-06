@@ -11,6 +11,12 @@ use core::fmt;
 /// [`KeyGenerationParameters`].
 pub const MAX_KEY_INFO_LENGTH: usize = 1024;
 
+/// `SHA-256("BLS-SIG-KEYGEN-SALT-")`.
+const COMPATIBILITY_SALT: [u8; 32] = [
+    0xaf, 0xf1, 0xb7, 0x03, 0x64, 0x7f, 0xe4, 0xbd, 0x43, 0x3a, 0x89, 0x3a, 0x3d, 0x2b, 0xa5, 0x1a,
+    0xbe, 0x26, 0xef, 0x79, 0x4a, 0x83, 0x56, 0xfe, 0xa6, 0x2e, 0x8e, 0x7c, 0x7c, 0x87, 0x75, 0x46,
+];
+
 /// Salt and application context for BLS `KeyGen`.
 #[derive(Clone, Copy)]
 pub struct KeyGenerationParameters<'a> {
@@ -46,6 +52,18 @@ impl<'a> KeyGenerationParameters<'a> {
 
         self.key_info = key_info;
         Ok(self)
+    }
+
+    /// Creates parameters using the draft-04 compatibility salt and empty
+    /// `key_info`.
+    ///
+    /// This is the parameter set used by
+    /// [`SecretKey::from_key_material`](crate::SecretKey::from_key_material).
+    /// Use [`Self::with_info`] to retain that salt while supplying application
+    /// context.
+    #[must_use]
+    pub const fn compatibility() -> Self {
+        Self::new(&COMPATIBILITY_SALT)
     }
 }
 
@@ -84,7 +102,9 @@ impl core::error::Error for KeyInfoTooLongError {}
 mod tests {
     use std::format;
 
-    use super::{KeyGenerationParameters, KeyInfoTooLongError, MAX_KEY_INFO_LENGTH};
+    use super::{
+        COMPATIBILITY_SALT, KeyGenerationParameters, KeyInfoTooLongError, MAX_KEY_INFO_LENGTH,
+    };
     use crate::SecretKey;
 
     #[test]
@@ -94,6 +114,33 @@ mod tests {
         let expected = blst::min_pk::SecretKey::key_gen_v5(&[42; 32], b"", b"").unwrap();
 
         assert_eq!(actual.to_bytes(), expected.to_bytes());
+    }
+
+    #[test]
+    fn compatibility_parameters_match_default_key_generation() {
+        let key_material = [42; 32];
+        let context = *b"context";
+        let default = SecretKey::from_key_material(&key_material).unwrap();
+        let explicit = SecretKey::from_key_material_with_parameters(
+            &key_material,
+            KeyGenerationParameters::compatibility(),
+        )
+        .unwrap();
+
+        assert_eq!(explicit.to_bytes(), default.to_bytes());
+
+        let with_info = SecretKey::from_key_material_with_parameters(
+            &key_material,
+            KeyGenerationParameters::compatibility()
+                .with_info(&context)
+                .unwrap(),
+        )
+        .unwrap();
+        let expected =
+            blst::min_pk::SecretKey::key_gen_v5(&key_material, &COMPATIBILITY_SALT, &context)
+                .unwrap();
+
+        assert_eq!(with_info.to_bytes(), expected.to_bytes());
     }
 
     #[test]
