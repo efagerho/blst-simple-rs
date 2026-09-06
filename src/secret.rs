@@ -364,6 +364,19 @@ mod tests {
     }
 
     #[test]
+    fn signs_with_largest_valid_scalar() {
+        let scalar = hex("73eda753299d7d483339d80809a1d80553bda402fffe5bfeffffffff00000000");
+        let secret_key = SecretKey::from_bytes(&scalar).unwrap();
+        let upstream = blst::min_pk::SecretKey::from_bytes(&scalar).unwrap();
+        let message = b"largest valid scalar";
+        let expected = upstream.sign(message, SIGNATURE_DST, b"").to_bytes();
+        let hashed = HashedMessage::new(message);
+
+        assert_eq!(secret_key.sign_message(message).to_bytes(), expected);
+        assert_eq!(secret_key.sign(&hashed).to_bytes(), expected);
+    }
+
+    #[test]
     fn proves_possession_of_the_public_key() {
         let scalar = hex("000000000000000000000000000000000000000000000000000000000000002a");
         let secret_key = SecretKey::from_bytes(&scalar).unwrap();
