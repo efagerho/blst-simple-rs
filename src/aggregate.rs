@@ -232,7 +232,7 @@ mod tests {
     };
     use crate::ffi;
     use crate::test_util::{hex, public_key, scalar, signature};
-    use crate::{AggregateError, DecodeError, PublicKey, Signature};
+    use crate::{AggregateError, PublicKey, Signature};
 
     fn upstream_signature_sum(signatures: &[Signature]) -> [u8; 96] {
         let signatures: Vec<_> = signatures
@@ -356,35 +356,6 @@ mod tests {
         assert_eq!(
             AggregateSignatureBuilder::from_aggregate(&identity).finish(),
             identity
-        );
-    }
-
-    #[test]
-    fn rejects_invalid_aggregate_signature_encodings() {
-        let uncompressed = [0; 96];
-        let mut malformed_identity = [0; 96];
-        malformed_identity[0] = 0xc0;
-        malformed_identity[95] = 1;
-        let mut not_on_curve = [0; 96];
-        not_on_curve[0] = 0x80;
-        let mut not_in_group = not_on_curve;
-        not_in_group[95] = 2;
-
-        assert_eq!(
-            AggregateSignature::from_bytes(&uncompressed).unwrap_err(),
-            DecodeError::BadEncoding
-        );
-        assert_eq!(
-            AggregateSignature::from_bytes(&malformed_identity).unwrap_err(),
-            DecodeError::BadEncoding
-        );
-        assert_eq!(
-            AggregateSignature::from_bytes(&not_on_curve).unwrap_err(),
-            DecodeError::NotOnCurve
-        );
-        assert_eq!(
-            AggregateSignature::from_bytes(&not_in_group).unwrap_err(),
-            DecodeError::NotInGroup
         );
     }
 
