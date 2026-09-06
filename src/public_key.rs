@@ -158,14 +158,31 @@ mod tests {
 
     #[cfg(blst_simple_dangerous)]
     #[test]
-    fn proof_bypass_preserves_the_admitted_key() {
-        let (bytes, _) = public_key_and_proof_bytes(scalar(1));
+    fn proof_bypass_matches_proof_verified_key_in_aggregate_verification() {
+        let secret = scalar(1);
+        let (bytes, proof_bytes) = public_key_and_proof_bytes(secret);
         let unverified = UnverifiedPublicKey::from_bytes(&bytes).unwrap();
+        let proof = ProofOfPossession::from_bytes(&proof_bytes).unwrap();
+        let proof_verified = unverified.verify_proof(&proof).unwrap();
+        let bypassed = crate::dangerous::assume_proof_verified(unverified);
+        let message = b"message";
+        let first_signature = crate::test_util::signature(secret, message);
+        let (other_key, other_signature) = crate::test_util::participant(scalar(2), message);
+        let mut signatures = crate::AggregateSignatureBuilder::new(&first_signature);
+        signatures.add(&other_signature);
+        let signature = signatures.finish();
+        let proof_verified_keys = [proof_verified, other_key];
+        let bypassed_keys = [bypassed, other_key];
+        let proof_verified_result =
+            signature.verify_message_with_keys(&proof_verified_keys, message);
 
-        let key = crate::dangerous::assume_proof_verified(unverified);
-
-        assert_eq!(&*key, &unverified);
-        assert_eq!(key.to_bytes(), bytes);
+        assert_eq!(&*bypassed, &unverified);
+        assert_eq!(bypassed.to_bytes(), bytes);
+        assert!(proof_verified_result);
+        assert_eq!(
+            signature.verify_message_with_keys(&bypassed_keys, message),
+            proof_verified_result
+        );
     }
 
     #[test]
