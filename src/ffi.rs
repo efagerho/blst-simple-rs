@@ -1,8 +1,6 @@
 use core::hash::{Hash, Hasher};
 use core::mem::MaybeUninit;
 use core::ptr;
-#[cfg(feature = "signing")]
-use core::sync::atomic::{Ordering, compiler_fence};
 
 use crate::DecodeError;
 use crate::suite::{PROOF_OF_POSSESSION_DST, SIGNATURE_DST};
@@ -234,7 +232,7 @@ fn g2_is_identity(point: &G2Affine) -> bool {
 }
 
 pub(crate) fn verify_signature(key: &G1Affine, message: &G2Affine, signature: &G2Affine) -> bool {
-    let product = miller_loop(key, message);
+    let product = MillerLoopResult::miller_loop(message, key);
     verify_miller_loop_product(&product, signature)
 }
 
@@ -245,18 +243,6 @@ pub(crate) fn verify_prepared_signature(
 ) -> bool {
     let product = miller_loop_prepared(key, message);
     verify_miller_loop_product(&product, signature)
-}
-
-pub(crate) fn miller_loop(key: &G1Affine, message: &G2Affine) -> MillerLoopResult {
-    let mut result = MaybeUninit::<MillerLoopResult>::uninit();
-
-    // SAFETY: Both input points are initialized. The single-point primitive
-    // accepts identity points and writes one complete Miller-loop result to
-    // the properly aligned output before it is read.
-    unsafe {
-        blst::blst_miller_loop(result.as_mut_ptr(), message, key);
-        result.assume_init()
-    }
 }
 
 /// Computes a batch of Miller loops.
@@ -320,29 +306,13 @@ pub(crate) fn miller_loop_prepared(key: &G1Affine, lines: &PreparedLines) -> Mil
     }
 }
 
-pub(crate) fn miller_loop_identity() -> MillerLoopResult {
-    // SAFETY: BLST returns a non-null pointer to a static, initialized value.
-    unsafe { *blst::blst_fp12_one() }
-}
-
-pub(crate) fn multiply_miller_loop(accumulator: &mut MillerLoopResult, term: &MillerLoopResult) {
-    // SAFETY: Both operands are initialized, and BLST supports aliasing the
-    // output with the first input for in-place multiplication.
-    unsafe {
-        let accumulator = accumulator as *mut MillerLoopResult;
-        blst::blst_fp12_mul(accumulator, accumulator, term);
-    }
-}
-
 pub(crate) fn verify_miller_loop_product(product: &MillerLoopResult, signature: &G2Affine) -> bool {
     // SAFETY: BLST returns a non-null pointer to a static, initialized affine
     // generator.
     let generator = unsafe { &*blst::blst_p1_affine_generator() };
-    let signature = miller_loop(generator, signature);
+    let signature = MillerLoopResult::miller_loop(signature, generator);
 
-    // SAFETY: Both Miller-loop results are initialized and remain valid for
-    // this read-only comparison.
-    unsafe { blst::blst_fp12_finalverify(product, &signature) }
+    MillerLoopResult::finalverify(product, &signature)
 }
 
 pub(crate) fn verify_proof(public_key: &G1Affine, proof: &G2Affine) -> bool {
@@ -467,26 +437,13 @@ pub(crate) fn derive_child(parent: &Scalar, index: u32) -> Scalar {
     }
 }
 
-#[cfg(feature = "signing")]
-pub(crate) fn zeroize_scalar(scalar: &mut Scalar) {
-    for byte in &mut scalar.b {
-        // SAFETY: `byte` is a uniquely borrowed, valid `u8` location. The
-        // volatile write stores a valid `u8` value without crossing its bounds.
-        unsafe {
-            ptr::write_volatile(byte, 0);
-        }
-    }
-    compiler_fence(Ordering::SeqCst);
-}
-
 #[cfg(test)]
 mod tests {
     use core::mem::size_of;
 
     use super::{
         G1Affine, G1Projective, G2Affine, G2Projective, MILLER_LOOP_BATCH_SIZE, MillerLoopResult,
-        PreparedLines, compress_g2, decode_g2, decode_status, hash_to_g2, miller_loop,
-        miller_loop_identity, miller_loop_many,
+        PreparedLines, compress_g2, decode_status, hash_to_g2, miller_loop_many,
     };
     use crate::DecodeError;
     use crate::suite::SIGNATURE_DST;
@@ -582,19 +539,6 @@ mod tests {
     }
 
     #[test]
-    fn single_miller_loop_maps_identity_to_gt_identity() {
-        let mut encoded_identity = [0; 96];
-        encoded_identity[0] = 0xc0;
-        let identity = decode_g2(&encoded_identity).unwrap();
-
-        // SAFETY: BLST returns a non-null pointer to a static, initialized
-        // affine generator.
-        let generator = unsafe { &*blst::blst_p1_affine_generator() };
-
-        assert_eq!(miller_loop(generator, &identity), miller_loop_identity());
-    }
-
-    #[test]
     #[should_panic(expected = "miller-loop key and message counts differ")]
     fn rejects_mismatched_miller_loop_inputs() {
         miller_loop_many(&[], &[G2Affine::default()]);
@@ -638,17 +582,5 @@ mod tests {
     #[should_panic(expected = "key material is too short")]
     fn rejects_invalid_internal_key_material() {
         super::derive_key_material(b"", b"", b"");
-    }
-
-    #[cfg(feature = "signing")]
-    #[test]
-    fn zeroizes_scalar_storage() {
-        let mut bytes = [0; 32];
-        bytes[31] = 1;
-        let mut scalar = super::decode_scalar(&bytes).unwrap();
-
-        super::zeroize_scalar(&mut scalar);
-
-        assert!(scalar.b.iter().all(|byte| *byte == 0));
     }
 }

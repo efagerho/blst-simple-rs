@@ -10,6 +10,11 @@ const DEFAULT_KEYGEN_SALT: [u8; 32] = [
     0xbe, 0x26, 0xef, 0x79, 0x4a, 0x83, 0x56, 0xfe, 0xa6, 0x2e, 0x8e, 0x7c, 0x7c, 0x87, 0x75, 0x46,
 ];
 
+// `SecretKey` relies on BLST's `zeroize(drop)` implementation for `Scalar`.
+// Fail compilation if an upgraded BLST version removes that destructor so the
+// erasure guarantee receives an explicit review.
+const _: () = assert!(core::mem::needs_drop::<Scalar>());
+
 /// A secret scalar suitable for BLS signing.
 ///
 /// Use [`Self::from_key_material`] for `KeyGen` with the draft-04 compatibility
@@ -131,12 +136,6 @@ impl SecretKey {
 impl fmt::Debug for SecretKey {
     fn fmt(&self, f: &mut fmt::Formatter<'_>) -> fmt::Result {
         f.write_str("SecretKey(REDACTED)")
-    }
-}
-
-impl Drop for SecretKey {
-    fn drop(&mut self) {
-        ffi::zeroize_scalar(&mut self.scalar);
     }
 }
 
