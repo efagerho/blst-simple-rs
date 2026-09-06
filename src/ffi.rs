@@ -1,6 +1,7 @@
 use core::hash::{Hash, Hasher};
 use core::mem::MaybeUninit;
 use core::ptr;
+use std::sync::Arc;
 
 use crate::DecodeError;
 use crate::suite::{PROOF_OF_POSSESSION_DST, SIGNATURE_DST};
@@ -100,13 +101,15 @@ pub(crate) fn decode_non_identity_g1(bytes: &[u8; 48]) -> Result<G1Affine, Decod
     }
 }
 
-pub(crate) fn precompute_lines(message: &G2Affine) -> Box<PreparedLines> {
-    let mut lines = Box::<PreparedLines>::new_uninit();
+pub(crate) fn precompute_lines(message: &G2Affine) -> Arc<PreparedLines> {
+    let mut lines = Arc::<PreparedLines>::new_uninit();
+    let output = Arc::get_mut(&mut lines).unwrap().as_mut_ptr();
 
-    // SAFETY: `message` is initialized, and the aligned boxed output has room
-    // for all 68 coefficients that BLST initializes.
+    // SAFETY: `message` is initialized, and the aligned, uniquely owned output
+    // has room for all 68 coefficients that BLST initializes. The allocation
+    // is shared only after initialization.
     unsafe {
-        blst::blst_precompute_lines(lines.as_mut_ptr().cast(), message);
+        blst::blst_precompute_lines(output.cast(), message);
         lines.assume_init()
     }
 }
