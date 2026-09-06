@@ -14,22 +14,24 @@ pub fn verify_single_at_each_entry_point(
     let hashed = HashedMessage::new(message);
     let prepared = hashed.prepare();
 
-    single_verification_results([
-        signature.verify_message(key, message),
-        signature.verify(key, &hashed),
-        signature.verify_prepared(key, &prepared),
-    ])
+    [
+        (
+            "raw-message signature",
+            signature.verify_message(key, message),
+        ),
+        ("hashed-message signature", signature.verify(key, &hashed)),
+        (
+            "prepared-message signature",
+            signature.verify_prepared(key, &prepared),
+        ),
+    ]
 }
 
 pub fn failed_single_verification() -> [(&'static str, bool); 3] {
-    single_verification_results([false; 3])
-}
-
-fn single_verification_results([raw, hashed, prepared]: [bool; 3]) -> [(&'static str, bool); 3] {
     [
-        ("raw-message signature", raw),
-        ("hashed-message signature", hashed),
-        ("prepared-message signature", prepared),
+        ("raw-message signature", false),
+        ("hashed-message signature", false),
+        ("prepared-message signature", false),
     ]
 }
 
@@ -42,68 +44,78 @@ pub fn verify_fast_aggregate_at_each_entry_point(
 ) -> [(&'static str, bool); 10] {
     let hashed = HashedMessage::new(message);
     let prepared = hashed.prepare();
-    let with_keys = [
-        signature.verify_message_with_keys(keys, message),
-        signature.verify_with_keys(keys, &hashed),
-        signature.verify_prepared_with_keys(keys, &prepared),
-    ];
-    let with_aggregate_key = match AggregatePublicKey::from_keys(keys) {
-        Ok(key) => {
-            let groups = [(&key, &hashed)];
-            let prepared_groups = [(&key, &prepared)];
-            let mut verifier = AggregateVerifier::new(1);
-            let streamed =
-                verifier.add(&key, &hashed).is_ok() && verifier.finish_and_reset(signature);
-            let mut verifier = AggregateVerifier::new(1);
-            let streamed_prepared = verifier.add_prepared(&key, &prepared).is_ok()
-                && verifier.finish_and_reset(signature);
+    let key = AggregatePublicKey::from_keys(keys).ok();
 
-            [
-                signature.verify_message(&key, message),
-                signature.verify(&key, &hashed),
-                signature.verify_prepared(&key, &prepared),
-                signature.verify_groups(&groups),
-                signature.verify_prepared_groups(&prepared_groups),
-                streamed,
-                streamed_prepared,
-            ]
-        }
-        Err(_) => [false; 7],
-    };
-
-    fast_aggregate_verification_results(with_keys, with_aggregate_key)
+    [
+        (
+            "raw message with keys",
+            signature.verify_message_with_keys(keys, message),
+        ),
+        (
+            "hashed message with keys",
+            signature.verify_with_keys(keys, &hashed),
+        ),
+        (
+            "prepared message with keys",
+            signature.verify_prepared_with_keys(keys, &prepared),
+        ),
+        (
+            "raw message with aggregate key",
+            key.as_ref()
+                .is_some_and(|key| signature.verify_message(key, message)),
+        ),
+        (
+            "hashed message with aggregate key",
+            key.as_ref()
+                .is_some_and(|key| signature.verify(key, &hashed)),
+        ),
+        (
+            "prepared message with aggregate key",
+            key.as_ref()
+                .is_some_and(|key| signature.verify_prepared(key, &prepared)),
+        ),
+        (
+            "hashed-message group slice",
+            key.as_ref()
+                .is_some_and(|key| signature.verify_groups(&[(key, &hashed)])),
+        ),
+        (
+            "prepared-message group slice",
+            key.as_ref()
+                .is_some_and(|key| signature.verify_prepared_groups(&[(key, &prepared)])),
+        ),
+        (
+            "hashed-message stream",
+            key.as_ref().is_some_and(|key| {
+                let mut verifier = AggregateVerifier::new(1);
+                verifier.add(key, &hashed).is_ok() && verifier.finish_and_reset(signature)
+            }),
+        ),
+        (
+            "prepared-message stream",
+            key.as_ref().is_some_and(|key| {
+                let mut verifier = AggregateVerifier::new(1);
+                verifier.add_prepared(key, &prepared).is_ok()
+                    && verifier.finish_and_reset(signature)
+            }),
+        ),
+    ]
 }
 
 #[cfg(blst_simple_dangerous)]
 #[allow(dead_code)]
 pub fn failed_fast_aggregate_verification() -> [(&'static str, bool); 10] {
-    fast_aggregate_verification_results([false; 3], [false; 7])
-}
-
-#[cfg(blst_simple_dangerous)]
-fn fast_aggregate_verification_results(
-    [raw_keys, hashed_keys, prepared_keys]: [bool; 3],
     [
-        raw_aggregate,
-        hashed_aggregate,
-        prepared_aggregate,
-        hashed_groups,
-        prepared_groups,
-        hashed_stream,
-        prepared_stream,
-    ]: [bool; 7],
-) -> [(&'static str, bool); 10] {
-    [
-        ("raw message with keys", raw_keys),
-        ("hashed message with keys", hashed_keys),
-        ("prepared message with keys", prepared_keys),
-        ("raw message with aggregate key", raw_aggregate),
-        ("hashed message with aggregate key", hashed_aggregate),
-        ("prepared message with aggregate key", prepared_aggregate),
-        ("hashed-message group slice", hashed_groups),
-        ("prepared-message group slice", prepared_groups),
-        ("hashed-message stream", hashed_stream),
-        ("prepared-message stream", prepared_stream),
+        ("raw message with keys", false),
+        ("hashed message with keys", false),
+        ("prepared message with keys", false),
+        ("raw message with aggregate key", false),
+        ("hashed message with aggregate key", false),
+        ("prepared message with aggregate key", false),
+        ("hashed-message group slice", false),
+        ("prepared-message group slice", false),
+        ("hashed-message stream", false),
+        ("prepared-message stream", false),
     ]
 }
 
