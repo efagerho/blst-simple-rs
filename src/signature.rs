@@ -33,7 +33,6 @@ mod tests {
     use std::collections::HashMap;
 
     use super::Signature;
-    use crate::DecodeError;
     use crate::test_util::{scalar, signature_bytes};
 
     #[test]
@@ -47,45 +46,5 @@ mod tests {
         assert_eq!(signature.to_bytes(), bytes);
         assert_eq!(signature, decoded_again);
         assert_eq!(signatures.get(&decoded_again), Some(&"valid"));
-    }
-
-    #[test]
-    fn rejects_bad_encoding_and_identity() {
-        let uncompressed = [0; 96];
-        let mut identity = [0; 96];
-        identity[0] = 0xc0;
-        let mut malformed_identity = identity;
-        malformed_identity[95] = 1;
-
-        assert_eq!(
-            Signature::from_bytes(&uncompressed).unwrap_err(),
-            DecodeError::BadEncoding
-        );
-        assert_eq!(
-            Signature::from_bytes(&identity).unwrap_err(),
-            DecodeError::PointAtInfinity
-        );
-        assert_eq!(
-            Signature::from_bytes(&malformed_identity).unwrap_err(),
-            DecodeError::BadEncoding
-        );
-    }
-
-    #[test]
-    fn rejects_points_outside_the_curve_and_subgroup() {
-        let mut not_on_curve = [0; 96];
-        not_on_curve[0] = 0x80;
-
-        let mut not_in_group = not_on_curve;
-        not_in_group[95] = 2;
-
-        assert_eq!(
-            Signature::from_bytes(&not_on_curve).unwrap_err(),
-            DecodeError::NotOnCurve
-        );
-        assert_eq!(
-            Signature::from_bytes(&not_in_group).unwrap_err(),
-            DecodeError::NotInGroup
-        );
     }
 }

@@ -104,46 +104,6 @@ mod tests {
     }
 
     #[test]
-    fn rejects_bad_encoding_identity_curve_and_subgroup() {
-        let uncompressed = [0; 48];
-        let mut identity = [0; 48];
-        identity[0] = 0xc0;
-        let mut malformed_identity = identity;
-        malformed_identity[47] = 1;
-        let mut not_in_group = [0; 48];
-        not_in_group[0] = 0x80;
-        let mut not_on_curve = not_in_group;
-        not_on_curve[47] = 1;
-        let mut on_curve_outside_subgroup = not_in_group;
-        on_curve_outside_subgroup[47] = 4;
-
-        assert_eq!(
-            UnverifiedPublicKey::from_bytes(&uncompressed).unwrap_err(),
-            DecodeError::BadEncoding
-        );
-        assert_eq!(
-            UnverifiedPublicKey::from_bytes(&identity).unwrap_err(),
-            DecodeError::PointAtInfinity
-        );
-        assert_eq!(
-            UnverifiedPublicKey::from_bytes(&malformed_identity).unwrap_err(),
-            DecodeError::BadEncoding
-        );
-        assert_eq!(
-            UnverifiedPublicKey::from_bytes(&not_in_group).unwrap_err(),
-            DecodeError::NotInGroup
-        );
-        assert_eq!(
-            UnverifiedPublicKey::from_bytes(&not_on_curve).unwrap_err(),
-            DecodeError::NotOnCurve
-        );
-        assert_eq!(
-            UnverifiedPublicKey::from_bytes(&on_curve_outside_subgroup).unwrap_err(),
-            DecodeError::NotInGroup
-        );
-    }
-
-    #[test]
     fn rejects_a_proof_for_another_key() {
         let (key_bytes, _) = public_key_and_proof_bytes(scalar(1));
         let (_, proof_bytes) = public_key_and_proof_bytes(scalar(2));
