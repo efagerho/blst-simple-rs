@@ -136,60 +136,73 @@ mod tests {
 
     #[test]
     fn displays_every_error_variant() {
-        let decode_errors = [
+        let cases = [
             (
-                DecodeError::BadEncoding,
+                "bad encoding",
+                format!("{}", DecodeError::BadEncoding),
                 "invalid compressed point encoding",
             ),
-            (DecodeError::NotOnCurve, "point is not on the curve"),
             (
-                DecodeError::NotInGroup,
+                "point not on curve",
+                format!("{}", DecodeError::NotOnCurve),
+                "point is not on the curve",
+            ),
+            (
+                "point not in group",
+                format!("{}", DecodeError::NotInGroup),
                 "point is not in the prime-order subgroup",
             ),
             (
-                DecodeError::PointAtInfinity,
+                "point at infinity",
+                format!("{}", DecodeError::PointAtInfinity),
                 "point at infinity is not allowed",
+            ),
+            (
+                "invalid proof",
+                format!("{}", InvalidProofError::VerificationFailed),
+                "proof of possession verification failed",
+            ),
+            (
+                "public key decode",
+                format!(
+                    "{}",
+                    ProofVerificationError::PublicKeyDecode(DecodeError::NotOnCurve)
+                ),
+                "invalid public key: point is not on the curve",
+            ),
+            (
+                "proof decode",
+                format!(
+                    "{}",
+                    ProofVerificationError::ProofDecode(DecodeError::NotInGroup)
+                ),
+                "invalid proof of possession: point is not in the prime-order subgroup",
+            ),
+            (
+                "proof verification",
+                format!("{}", ProofVerificationError::InvalidProof),
+                "proof of possession verification failed",
+            ),
+            (
+                "empty aggregate",
+                format!("{}", AggregateError::EmptyInput),
+                "cannot aggregate an empty public-key slice",
+            ),
+            (
+                "key cancellation",
+                format!("{}", AggregateError::KeysCancelToIdentity),
+                "public keys cancel to the identity",
+            ),
+            (
+                "distinct message limit",
+                format!("{}", TooManyDistinctMessagesError { maximum: 4 }),
+                "distinct message limit exceeded (maximum 4)",
             ),
         ];
 
-        for (error, expected) in decode_errors {
-            assert_eq!(format!("{error}"), expected);
+        for (case, actual, expected) in cases {
+            assert_eq!(actual, expected, "{case}");
         }
-
-        assert_eq!(
-            format!("{}", InvalidProofError::VerificationFailed),
-            "proof of possession verification failed"
-        );
-        assert_eq!(
-            format!(
-                "{}",
-                ProofVerificationError::PublicKeyDecode(DecodeError::NotOnCurve)
-            ),
-            "invalid public key: point is not on the curve"
-        );
-        assert_eq!(
-            format!(
-                "{}",
-                ProofVerificationError::ProofDecode(DecodeError::NotInGroup)
-            ),
-            "invalid proof of possession: point is not in the prime-order subgroup"
-        );
-        assert_eq!(
-            format!("{}", ProofVerificationError::InvalidProof),
-            "proof of possession verification failed"
-        );
-        assert_eq!(
-            format!("{}", AggregateError::EmptyInput),
-            "cannot aggregate an empty public-key slice"
-        );
-        assert_eq!(
-            format!("{}", AggregateError::KeysCancelToIdentity),
-            "public keys cancel to the identity"
-        );
-        assert_eq!(
-            format!("{}", TooManyDistinctMessagesError { maximum: 4 }),
-            "distinct message limit exceeded (maximum 4)"
-        );
     }
 
     #[test]

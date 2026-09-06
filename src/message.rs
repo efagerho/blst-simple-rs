@@ -103,12 +103,23 @@ mod tests {
     }
 
     #[test]
-    fn hashes_empty_and_binary_messages() {
-        let empty = HashedMessage::new(b"");
-        let prepared_empty = PreparedMessage::hash_and_prepare(b"");
+    fn preparation_retains_empty_and_binary_messages() {
+        let cases = [("empty", &b""[..]), ("binary", &b"a\0\xffb"[..])];
 
-        assert_eq!(prepared_empty.as_hashed_message(), &empty);
-        let _ = HashedMessage::new(b"a\0\xffb");
+        for (case, message) in cases {
+            let hashed = HashedMessage::new(message);
+
+            assert_eq!(
+                hashed.prepare().as_hashed_message(),
+                &hashed,
+                "prepare: {case}"
+            );
+            assert_eq!(
+                PreparedMessage::hash_and_prepare(message).as_hashed_message(),
+                &hashed,
+                "hash and prepare: {case}"
+            );
+        }
     }
 
     #[test]
@@ -150,22 +161,6 @@ mod tests {
 
         assert!(vector.output);
         assert_eq!(ffi::compress_g2(&hashed.point), expected);
-    }
-
-    #[test]
-    fn prepare_retains_the_hashed_message() {
-        let hashed = HashedMessage::new(b"prepared message");
-        let prepared = hashed.prepare();
-
-        assert_eq!(prepared.as_hashed_message(), &hashed);
-    }
-
-    #[test]
-    fn hash_and_prepare_retains_the_expected_hashed_message() {
-        let prepared = PreparedMessage::hash_and_prepare(b"prepared message");
-        let hashed = HashedMessage::new(b"prepared message");
-
-        assert_eq!(prepared.as_hashed_message(), &hashed);
     }
 
     #[test]

@@ -112,12 +112,26 @@ mod tests {
     use crate::SecretKey;
 
     #[test]
-    fn accepts_empty_salt_and_key_info() {
-        let parameters = KeyGenerationParameters::new(b"").with_info(b"").unwrap();
-        let actual = SecretKey::from_key_material_with_parameters(&[42; 32], parameters).unwrap();
-        let expected = blst::min_pk::SecretKey::key_gen_v5(&[42; 32], b"", b"").unwrap();
+    fn explicit_parameters_match_blst() {
+        let key_material = [42; 32];
+        let cases = [
+            ("empty salt and info", &b""[..], &b""[..]),
+            ("salt only", &b"salt"[..], &b""[..]),
+            ("info only", &b""[..], &b"context"[..]),
+            ("salt and info", &b"salt"[..], &b"context"[..]),
+        ];
 
-        assert_eq!(actual.to_bytes(), expected.to_bytes());
+        for (case, salt, key_info) in cases {
+            let parameters = KeyGenerationParameters::new(salt)
+                .with_info(key_info)
+                .unwrap();
+            let actual =
+                SecretKey::from_key_material_with_parameters(&key_material, parameters).unwrap();
+            let expected =
+                blst::min_pk::SecretKey::key_gen_v5(&key_material, salt, key_info).unwrap();
+
+            assert_eq!(actual.to_bytes(), expected.to_bytes(), "{case}");
+        }
     }
 
     #[test]
