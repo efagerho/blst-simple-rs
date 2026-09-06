@@ -395,12 +395,17 @@ pub(crate) fn encode_scalar(scalar: &blst::blst_scalar) -> [u8; 32] {
 #[cfg(feature = "signing")]
 pub(crate) fn derive_key_material(key_material: &[u8], salt: &[u8], key_info: &[u8]) -> Scalar {
     assert!(key_material.len() >= 32, "key material is too short");
+    assert!(
+        key_info.len() <= crate::keygen::MAX_KEY_INFO_LENGTH,
+        "key info is too long"
+    );
 
     let mut scalar = MaybeUninit::<Scalar>::uninit();
 
     // SAFETY: Each slice pointer is valid for its corresponding length, and
-    // the asserted key-material length satisfies BLST's precondition. BLST
-    // initializes `scalar` before it is read or checked.
+    // the assertions satisfy BLST's key-material precondition and bound its
+    // key-info-dependent stack allocation. BLST initializes `scalar` before
+    // it is read or checked.
     unsafe {
         blst::blst_keygen_v5(
             scalar.as_mut_ptr(),
@@ -582,5 +587,14 @@ mod tests {
     #[should_panic(expected = "key material is too short")]
     fn rejects_invalid_internal_key_material() {
         super::derive_key_material(b"", b"", b"");
+    }
+
+    #[cfg(feature = "signing")]
+    #[test]
+    #[should_panic(expected = "key info is too long")]
+    fn rejects_oversized_internal_key_info() {
+        let key_info = [0; crate::keygen::MAX_KEY_INFO_LENGTH + 1];
+
+        super::derive_key_material(&[42; 32], b"", &key_info);
     }
 }
