@@ -739,48 +739,61 @@ mod tests {
     }
 
     #[test]
-    fn slice_verification_rejects_identity_equal_message_key_sums() {
-        let message = b"shared message";
-        let (first_key, first_signature) = participant(scalar(1), message);
+    fn verification_rejects_identity_equal_message_key_sums() {
+        let message_bytes = b"shared message";
+        let (first_key, first_signature) = participant(scalar(1), message_bytes);
         let (inverse_key, inverse_signature) = participant(
             hex("73eda753299d7d483339d80809a1d80553bda402fffe5bfeffffffff00000000"),
-            message,
+            message_bytes,
         );
         let signature = aggregate_signatures(&[first_signature, inverse_signature]);
-        let first_key = AggregatePublicKey::from(first_key);
-        let inverse_key = AggregatePublicKey::from(inverse_key);
-        let hashed = HashedMessage::new(message);
+        let keys = [first_key, inverse_key];
+        let aggregate_keys = keys.map(AggregatePublicKey::from);
+        let hashed = HashedMessage::new(message_bytes);
         let prepared = hashed.prepare();
+        let groups = [(&aggregate_keys[0], &hashed), (&aggregate_keys[1], &hashed)];
+        let prepared_groups = [
+            (&aggregate_keys[0], &prepared),
+            (&aggregate_keys[1], &prepared),
+        ];
+        let mut verifier = AggregateVerifier::new(1);
+
+        verifier.extend(&groups).unwrap();
+        let hashed_stream = verifier.finish_and_reset(&signature);
+        verifier.extend_prepared(&prepared_groups).unwrap();
+        let prepared_stream = verifier.finish_and_reset(&signature);
+        verifier.add(&aggregate_keys[0], &hashed).unwrap();
+        verifier
+            .add_prepared(&aggregate_keys[1], &prepared)
+            .unwrap();
+        let mixed_stream = verifier.finish_and_reset(&signature);
 
         assert_eq!(signature.to_bytes()[0], 0xc0);
         assert!(signature.to_bytes()[1..].iter().all(|byte| *byte == 0));
-        assert!(!signature.verify_groups(&[(&first_key, &hashed), (&inverse_key, &hashed),]));
-        assert!(
-            !signature
-                .verify_prepared_groups(&[(&first_key, &prepared), (&inverse_key, &prepared),])
-        );
-    }
-
-    #[test]
-    fn streaming_verification_rejects_identity_equal_message_key_sums() {
-        let message = b"shared message";
-        let (first_key, first_signature) = participant(scalar(1), message);
-        let (inverse_key, inverse_signature) = participant(
-            hex("73eda753299d7d483339d80809a1d80553bda402fffe5bfeffffffff00000000"),
-            message,
-        );
-        let signature = aggregate_signatures(&[first_signature, inverse_signature]);
-        let first_key = AggregatePublicKey::from(first_key);
-        let inverse_key = AggregatePublicKey::from(inverse_key);
-        let message = HashedMessage::new(message);
-        let prepared = message.prepare();
-        let mut verifier = AggregateVerifier::new(1);
-
-        verifier.add(&first_key, &message).unwrap();
-        verifier.add_prepared(&inverse_key, &prepared).unwrap();
-
-        assert!(!verifier.finish_and_reset(&signature));
-        assert!(!verifier.finish_and_reset(&signature));
+        for (path, result) in [
+            (
+                "raw message with keys",
+                signature.verify_message_with_keys(&keys, message_bytes),
+            ),
+            (
+                "hashed message with keys",
+                signature.verify_with_keys(&keys, &hashed),
+            ),
+            (
+                "prepared message with keys",
+                signature.verify_prepared_with_keys(&keys, &prepared),
+            ),
+            ("hashed group slice", signature.verify_groups(&groups)),
+            (
+                "prepared group slice",
+                signature.verify_prepared_groups(&prepared_groups),
+            ),
+            ("hashed stream", hashed_stream),
+            ("prepared stream", prepared_stream),
+            ("mixed stream", mixed_stream),
+        ] {
+            assert!(!result, "{path}");
+        }
     }
 
     #[test]
@@ -1099,27 +1112,6 @@ mod tests {
     }
 
     #[test]
-    fn prepared_streaming_grouping_rejects_canceling_keys() {
-        let message = b"shared message";
-        let (first_key, first_signature) = participant(scalar(1), message);
-        let (inverse_key, inverse_signature) = participant(
-            hex("73eda753299d7d483339d80809a1d80553bda402fffe5bfeffffffff00000000"),
-            message,
-        );
-        let signature = aggregate_signatures(&[first_signature, inverse_signature]);
-        let first_key = AggregatePublicKey::from(first_key);
-        let inverse_key = AggregatePublicKey::from(inverse_key);
-        let prepared = HashedMessage::new(message).prepare();
-        let mut verifier = AggregateVerifier::new(1);
-
-        verifier
-            .extend_prepared(&[(&first_key, &prepared), (&inverse_key, &prepared)])
-            .unwrap();
-
-        assert!(!verifier.finish_and_reset(&signature));
-    }
-
-    #[test]
     fn reset_discards_pending_groups() {
         let (key, signature) = participant(scalar(1), b"message");
         let key = AggregatePublicKey::from(key);
@@ -1144,24 +1136,6 @@ mod tests {
 
         verifier.add(&key, &message).unwrap();
         assert!(verifier.finish_and_reset(&signature));
-    }
-
-    #[test]
-    fn fast_verification_rejects_keys_that_cancel_to_identity() {
-        let message = b"shared message";
-        let (first_key, first_signature) = participant(scalar(1), message);
-        let (inverse_key, inverse_signature) = participant(
-            hex("73eda753299d7d483339d80809a1d80553bda402fffe5bfeffffffff00000000"),
-            message,
-        );
-        let signature = aggregate_signatures(&[first_signature, inverse_signature]);
-        let keys = [first_key, inverse_key];
-        let hashed = HashedMessage::new(message);
-        let prepared = hashed.prepare();
-
-        assert!(!signature.verify_message_with_keys(&keys, message));
-        assert!(!signature.verify_with_keys(&keys, &hashed));
-        assert!(!signature.verify_prepared_with_keys(&keys, &prepared));
     }
 
     #[test]
