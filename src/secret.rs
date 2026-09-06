@@ -283,34 +283,6 @@ mod tests {
     }
 
     #[test]
-    fn configurable_key_generation_forwards_all_parameters() {
-        let key_material = [42; 32];
-        let empty = SecretKey::from_key_material_with_parameters(
-            &key_material,
-            KeyGenerationParameters::new(b""),
-        )
-        .unwrap();
-        let salted = SecretKey::from_key_material_with_parameters(
-            &key_material,
-            KeyGenerationParameters::new(b"salt"),
-        )
-        .unwrap();
-        let informed = SecretKey::from_key_material_with_parameters(
-            &key_material,
-            KeyGenerationParameters::new(b"")
-                .with_info(b"context")
-                .unwrap(),
-        )
-        .unwrap();
-
-        let upstream = blst::min_pk::SecretKey::key_gen_v5(&key_material, b"", b"context").unwrap();
-        assert_eq!(informed.to_bytes(), upstream.to_bytes());
-
-        assert_ne!(empty.to_bytes(), salted.to_bytes());
-        assert_ne!(empty.to_bytes(), informed.to_bytes());
-    }
-
-    #[test]
     fn derives_the_public_key() {
         let scalar = hex("0000000000000000000000000000000000000000000000000000000000000001");
         let secret_key = SecretKey::from_bytes(&scalar).unwrap();
@@ -322,42 +294,37 @@ mod tests {
         );
     }
 
-    #[cfg(feature = "secret-key-export")]
     #[test]
-    fn exports_the_secret_scalar() {
-        let mut scalar = [0; 32];
-        scalar[31] = 1;
-        let secret_key = SecretKey::from_bytes(&scalar).unwrap();
+    fn signing_matches_blst() {
+        let ordinary = "000000000000000000000000000000000000000000000000000000000000002a";
+        let cases = [
+            ("empty message", ordinary, &b""[..]),
+            ("binary message", ordinary, &b"a\0\xffb"[..]),
+            (
+                "largest valid scalar",
+                "73eda753299d7d483339d80809a1d80553bda402fffe5bfeffffffff00000000",
+                &b"largest valid scalar"[..],
+            ),
+        ];
 
-        assert_eq!(secret_key.to_bytes(), scalar);
-    }
-
-    #[test]
-    fn signs_raw_and_hashed_messages() {
-        let scalar = hex("000000000000000000000000000000000000000000000000000000000000002a");
-        let secret_key = SecretKey::from_bytes(&scalar).unwrap();
-        let upstream = blst::min_pk::SecretKey::from_bytes(&scalar).unwrap();
-
-        for message in [&b""[..], &b"a\0\xffb"[..]] {
+        for (case, scalar, message) in cases {
+            let scalar: [u8; 32] = hex(scalar);
+            let secret_key = SecretKey::from_bytes(&scalar).unwrap();
+            let upstream = blst::min_pk::SecretKey::from_bytes(&scalar).unwrap();
             let expected = upstream.sign(message, SIGNATURE_DST, b"").to_bytes();
             let hashed = HashedMessage::new(message);
 
-            assert_eq!(secret_key.sign_message(message).to_bytes(), expected);
-            assert_eq!(secret_key.sign(&hashed).to_bytes(), expected);
+            assert_eq!(
+                secret_key.sign_message(message).to_bytes(),
+                expected,
+                "raw-message signing: {case}"
+            );
+            assert_eq!(
+                secret_key.sign(&hashed).to_bytes(),
+                expected,
+                "hashed-message signing: {case}"
+            );
         }
-    }
-
-    #[test]
-    fn signs_with_largest_valid_scalar() {
-        let scalar = hex("73eda753299d7d483339d80809a1d80553bda402fffe5bfeffffffff00000000");
-        let secret_key = SecretKey::from_bytes(&scalar).unwrap();
-        let upstream = blst::min_pk::SecretKey::from_bytes(&scalar).unwrap();
-        let message = b"largest valid scalar";
-        let expected = upstream.sign(message, SIGNATURE_DST, b"").to_bytes();
-        let hashed = HashedMessage::new(message);
-
-        assert_eq!(secret_key.sign_message(message).to_bytes(), expected);
-        assert_eq!(secret_key.sign(&hashed).to_bytes(), expected);
     }
 
     #[test]

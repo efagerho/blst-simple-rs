@@ -509,26 +509,43 @@ mod tests {
             BLST_POINT_NOT_IN_GROUP, BLST_POINT_NOT_ON_CURVE, BLST_SUCCESS, BLST_VERIFY_FAIL,
         };
 
-        assert_eq!(decode_status(BLST_SUCCESS), Ok(()));
-        assert_eq!(
-            decode_status(BLST_BAD_ENCODING),
-            Err(DecodeError::BadEncoding)
-        );
-        assert_eq!(
-            decode_status(BLST_POINT_NOT_ON_CURVE),
-            Err(DecodeError::NotOnCurve)
-        );
-        assert_eq!(
-            decode_status(BLST_POINT_NOT_IN_GROUP),
-            Err(DecodeError::NotInGroup)
-        );
-        assert_eq!(
-            decode_status(BLST_PK_IS_INFINITY),
-            Err(DecodeError::PointAtInfinity)
-        );
+        let cases = [
+            ("success", BLST_SUCCESS, Ok(())),
+            (
+                "bad encoding",
+                BLST_BAD_ENCODING,
+                Err(DecodeError::BadEncoding),
+            ),
+            (
+                "point not on curve",
+                BLST_POINT_NOT_ON_CURVE,
+                Err(DecodeError::NotOnCurve),
+            ),
+            (
+                "point not in group",
+                BLST_POINT_NOT_IN_GROUP,
+                Err(DecodeError::NotInGroup),
+            ),
+            (
+                "public key is infinity",
+                BLST_PK_IS_INFINITY,
+                Err(DecodeError::PointAtInfinity),
+            ),
+            (
+                "aggregate type mismatch",
+                BLST_AGGR_TYPE_MISMATCH,
+                Err(DecodeError::BadEncoding),
+            ),
+            (
+                "verification failure",
+                BLST_VERIFY_FAIL,
+                Err(DecodeError::BadEncoding),
+            ),
+            ("bad scalar", BLST_BAD_SCALAR, Err(DecodeError::BadEncoding)),
+        ];
 
-        for status in [BLST_AGGR_TYPE_MISMATCH, BLST_VERIFY_FAIL, BLST_BAD_SCALAR] {
-            assert_eq!(decode_status(status), Err(DecodeError::BadEncoding));
+        for (case, status, expected) in cases {
+            assert_eq!(decode_status(status), expected, "{case}");
         }
     }
 
