@@ -569,7 +569,7 @@ mod tests {
     }
 
     #[test]
-    fn verifies_multi_message_and_mixed_streaming_aggregates() {
+    fn verifies_multi_message_group_slices() {
         let (first_key, first_signature) = participant(scalar(1), b"one");
         let (second_key, second_signature) = participant(scalar(2), b"two");
         let (third_key, third_signature) = participant(scalar(3), b"one");
@@ -612,26 +612,18 @@ mod tests {
         ]));
         assert!(!signature.verify_groups(&[]));
         assert!(!signature.verify_prepared_groups(&[]));
-
-        let mut verifier = AggregateVerifier::new(2);
-        verifier.add(&keys[0], &messages[0]).unwrap();
-        verifier.add_prepared(&keys[1], &prepared[1]).unwrap();
-        verifier.extend(&[(&keys[2], &messages[2])]).unwrap();
-        assert!(verifier.finish_and_reset(&signature));
-
-        let mut verifier = AggregateVerifier::new(2);
-        verifier
-            .extend_prepared(&[
-                (&keys[0], &prepared[0]),
-                (&keys[1], &prepared[1]),
-                (&keys[2], &prepared[2]),
-            ])
-            .unwrap();
-        assert!(verifier.finish_and_reset(&signature));
     }
 
     #[test]
-    fn flushes_full_and_partial_miller_loop_batches() {
+    fn verifies_streaming_batch_cases() {
+        #[derive(Clone, Copy)]
+        enum Preparation {
+            Hashed,
+            Prepared,
+            Mixed,
+        }
+        use Preparation::{Hashed, Mixed, Prepared};
+
         let mut keys = Vec::new();
         let mut messages = Vec::new();
         let mut signatures = Vec::new();
@@ -644,64 +636,66 @@ mod tests {
             signatures.push(signature);
         }
 
-        let groups: Vec<_> = keys.iter().zip(&messages).collect();
-        let mut verifier = AggregateVerifier::try_with_initial_capacity(messages.len(), 1).unwrap();
-
-        for count in [
-            1,
-            MILLER_LOOP_BATCH_SIZE - 1,
-            MILLER_LOOP_BATCH_SIZE,
-            MILLER_LOOP_BATCH_SIZE + 1,
-            MILLER_LOOP_BATCH_SIZE * 2,
-            MILLER_LOOP_BATCH_SIZE * 2 + 1,
-        ] {
-            let signature = aggregate_signatures(&signatures[..count]);
-
-            assert!(signature.verify_groups(&groups[..count]));
-
-            verifier.extend(&groups[..count]).unwrap();
-            assert!(verifier.finish_and_reset(&signature));
-        }
-
-        assert!(verifier.groups.capacity() >= messages.len());
-    }
-
-    #[test]
-    fn streaming_verification_combines_repeated_messages_across_batches() {
-        let mut keys = Vec::new();
-        let mut messages = Vec::new();
-        let mut signatures = Vec::new();
-        for value in 1..=MILLER_LOOP_BATCH_SIZE as u8 + 1 {
-            let (key, signature) = participant(scalar(value), &[value]);
-            keys.push(AggregatePublicKey::from(key));
-            messages.push(HashedMessage::new(&[value]));
-            signatures.push(signature);
-        }
         let prepared: Vec<_> = messages.iter().map(HashedMessage::prepare).collect();
-        let groups: Vec<_> = keys
-            .iter()
-            .zip(&messages)
-            .cycle()
-            .take(messages.len() * 4)
-            .collect();
-        let signatures = signatures.repeat(4);
-        let signature = aggregate_signatures(&signatures);
-        assert!(signature.verify_groups(&groups));
+        let batch = MILLER_LOOP_BATCH_SIZE;
+        let cases = [
+            ("one group", 1, 1, Hashed),
+            ("partial batch", batch - 1, 1, Hashed),
+            ("full batch", batch, 1, Hashed),
+            ("full and partial batches", batch + 1, 1, Hashed),
+            ("two full batches", batch * 2, 1, Hashed),
+            ("two full and one partial batch", batch * 2 + 1, 1, Hashed),
+            ("repeated hashed messages", batch + 1, 4, Hashed),
+            ("repeated prepared messages", batch + 1, 4, Prepared),
+            ("repeated mixed messages", batch + 1, 4, Mixed),
+        ];
 
-        for mode in ["hashed", "prepared", "mixed"] {
-            let mut verifier = AggregateVerifier::new(messages.len());
-            for (index, &(key, message)) in groups.iter().enumerate() {
-                if mode == "prepared" || (mode == "mixed" && index % 2 == 0) {
-                    verifier
-                        .add_prepared(key, &prepared[index % messages.len()])
-                        .unwrap();
-                } else {
-                    verifier.add(key, message).unwrap();
+        for (case, distinct_messages, repetitions, preparation) in cases {
+            let groups: Vec<_> = keys[..distinct_messages]
+                .iter()
+                .zip(&messages[..distinct_messages])
+                .collect();
+            let groups = groups.repeat(repetitions);
+            let prepared_groups: Vec<_> = keys[..distinct_messages]
+                .iter()
+                .zip(&prepared[..distinct_messages])
+                .collect();
+            let prepared_groups = prepared_groups.repeat(repetitions);
+            let signature =
+                aggregate_signatures(&signatures[..distinct_messages].repeat(repetitions));
+            let mut verifier =
+                AggregateVerifier::try_with_initial_capacity(distinct_messages, 1).unwrap();
+
+            match preparation {
+                Hashed => verifier.extend(&groups).unwrap(),
+                Prepared => verifier.extend_prepared(&prepared_groups).unwrap(),
+                Mixed => {
+                    for (contribution, (&(key, message), &(_, prepared_message))) in
+                        groups.iter().zip(&prepared_groups).enumerate()
+                    {
+                        if contribution % distinct_messages % 2 == 0 {
+                            verifier.add_prepared(key, prepared_message).unwrap();
+                        } else {
+                            verifier.add(key, message).unwrap();
+                        }
+                    }
                 }
             }
 
-            assert_eq!(verifier.groups.len(), messages.len());
-            assert!(verifier.finish_and_reset(&signature), "{mode}");
+            assert_eq!(verifier.groups.len(), distinct_messages, "{case}");
+            if let Mixed = preparation {
+                let prepared_count = verifier
+                    .groups
+                    .values()
+                    .filter(|group| group.prepared_lines.is_some())
+                    .count();
+                assert!(
+                    prepared_count > 0 && prepared_count < distinct_messages,
+                    "{case}"
+                );
+            }
+            assert!(signature.verify_groups(&groups), "slice: {case}");
+            assert!(verifier.finish_and_reset(&signature), "stream: {case}");
         }
     }
 
@@ -988,22 +982,6 @@ mod tests {
     #[test]
     fn unrepresentable_initial_capacity_returns_an_error() {
         assert!(AggregateVerifier::try_with_initial_capacity(usize::MAX, usize::MAX).is_err());
-    }
-
-    #[test]
-    fn repeated_messages_are_accepted_at_the_limit() {
-        let (key, signature) = participant(scalar(1), b"message");
-        let key = AggregatePublicKey::from(key);
-        let signature = aggregate_signatures(&[signature, signature]);
-        let message = HashedMessage::new(b"message");
-        let prepared = message.prepare();
-        let mut verifier = AggregateVerifier::new(1);
-
-        verifier.add(&key, &message).unwrap();
-        verifier.add_prepared(&key, &prepared).unwrap();
-
-        assert_eq!(verifier.groups.len(), 1);
-        assert!(verifier.finish_and_reset(&signature));
     }
 
     #[test]
