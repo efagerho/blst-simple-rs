@@ -9,6 +9,10 @@ use core::fmt;
 
 /// Maximum number of application-context bytes accepted by
 /// [`KeyGenerationParameters`].
+///
+/// BLST copies `key_info` and its length encoding into a variable-size native
+/// stack buffer during key generation. This limit keeps caller-controlled
+/// context from causing unbounded stack usage at the FFI boundary.
 pub const MAX_KEY_INFO_LENGTH: usize = 1024;
 
 /// `SHA-256("BLS-SIG-KEYGEN-SALT-")`.
