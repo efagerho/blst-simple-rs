@@ -181,7 +181,7 @@ struct PairingAccumulator {
 impl PairingAccumulator {
     fn new() -> Self {
         Self {
-            accumulator: ffi::miller_loop_identity(),
+            accumulator: MillerLoopResult::default(),
             staged_keys: [G1Affine::default(); MILLER_LOOP_BATCH_SIZE],
             staged_messages: [G2Affine::default(); MILLER_LOOP_BATCH_SIZE],
             staged: 0,
@@ -200,7 +200,7 @@ impl PairingAccumulator {
 
     fn add_prepared(&mut self, key: &G1Affine, message: &PreparedLines) {
         let term = ffi::miller_loop_prepared(key, message);
-        ffi::multiply_miller_loop(&mut self.accumulator, &term);
+        self.accumulator *= term;
     }
 
     fn verify(&mut self, signature: &G2Affine) -> bool {
@@ -209,7 +209,7 @@ impl PairingAccumulator {
     }
 
     fn reset(&mut self) {
-        self.accumulator = ffi::miller_loop_identity();
+        self.accumulator = MillerLoopResult::default();
         self.staged = 0;
     }
 
@@ -222,7 +222,7 @@ impl PairingAccumulator {
             &self.staged_keys[..self.staged],
             &self.staged_messages[..self.staged],
         );
-        ffi::multiply_miller_loop(&mut self.accumulator, &term);
+        self.accumulator *= term;
         self.staged = 0;
     }
 }
