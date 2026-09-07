@@ -5,11 +5,11 @@ use crate::{DecodeError, InvalidProofError, ProofOfPossession, ProofVerification
 
 /// A decoded and subgroup-checked public key that has not proved possession.
 #[derive(Clone, Copy, Debug, PartialEq, Eq)]
-pub struct UnverifiedPublicKey {
+pub struct UnprovenPublicKey {
     pub(crate) point: G1Affine,
 }
 
-impl UnverifiedPublicKey {
+impl UnprovenPublicKey {
     /// Uncompresses, subgroup-checks, and rejects the identity.
     pub fn from_bytes(bytes: &[u8; 48]) -> Result<Self, DecodeError> {
         ffi::decode_non_identity_g1(bytes).map(|point| Self { point })
@@ -25,36 +25,36 @@ impl UnverifiedPublicKey {
     /// verification capability on success.
     pub fn verify_proof(&self, proof: &ProofOfPossession) -> Result<PublicKey, InvalidProofError> {
         ffi::verify_proof(&self.point, &proof.point)
-            .then_some(PublicKey { unverified: *self })
+            .then_some(PublicKey { unproven: *self })
             .ok_or(InvalidProofError::VerificationFailed)
     }
 }
 
-impl Hash for UnverifiedPublicKey {
+impl Hash for UnprovenPublicKey {
     fn hash<H: Hasher>(&self, state: &mut H) {
-        ffi::hash_g1(&self.point, state);
+        ffi::hash_g1_coordinates(&self.point, state);
     }
 }
 
 /// A public key carrying the capability that possession was verified.
 #[derive(Clone, Copy, Debug, PartialEq, Eq, Hash)]
 pub struct PublicKey {
-    pub(crate) unverified: UnverifiedPublicKey,
+    pub(crate) unproven: UnprovenPublicKey,
 }
 
 impl core::ops::Deref for PublicKey {
-    type Target = UnverifiedPublicKey;
+    type Target = UnprovenPublicKey;
 
     fn deref(&self) -> &Self::Target {
-        &self.unverified
+        &self.unproven
     }
 }
 
 impl PublicKey {
     #[cfg(feature = "signing")]
-    pub(crate) fn from_secret(point: G1Affine) -> Self {
+    pub(crate) fn from_secret_derived_point(point: G1Affine) -> Self {
         Self {
-            unverified: UnverifiedPublicKey { point },
+            unproven: UnprovenPublicKey { point },
         }
     }
 
@@ -63,7 +63,7 @@ impl PublicKey {
         bytes: &[u8; 48],
         proof: &[u8; 96],
     ) -> Result<Self, ProofVerificationError> {
-        let key = UnverifiedPublicKey::from_bytes(bytes)
+        let key = UnprovenPublicKey::from_bytes(bytes)
             .map_err(ProofVerificationError::PublicKeyDecode)?;
         let proof =
             ProofOfPossession::from_bytes(proof).map_err(ProofVerificationError::ProofDecode)?;
@@ -73,7 +73,7 @@ impl PublicKey {
     /// Returns the canonical 48-byte compressed encoding.
     #[must_use]
     pub fn to_bytes(&self) -> [u8; 48] {
-        self.unverified.to_bytes()
+        self.unproven.to_bytes()
     }
 }
 
@@ -81,15 +81,15 @@ impl PublicKey {
 mod tests {
     use std::collections::HashMap;
 
-    use super::{PublicKey, UnverifiedPublicKey};
-    use crate::test_util::{public_key_and_proof_bytes, scalar};
+    use super::{PublicKey, UnprovenPublicKey};
+    use crate::test_util::{public_key_and_proof_bytes, scalar_bytes};
     use crate::{DecodeError, InvalidProofError, ProofOfPossession, ProofVerificationError};
 
     #[test]
     fn round_trips_and_verifies_a_proved_key() {
-        let (key_bytes, proof_bytes) = public_key_and_proof_bytes(scalar(1));
-        let key = UnverifiedPublicKey::from_bytes(&key_bytes).unwrap();
-        let decoded_again = UnverifiedPublicKey::from_bytes(&key.to_bytes()).unwrap();
+        let (key_bytes, proof_bytes) = public_key_and_proof_bytes(scalar_bytes(1));
+        let key = UnprovenPublicKey::from_bytes(&key_bytes).unwrap();
+        let decoded_again = UnprovenPublicKey::from_bytes(&key.to_bytes()).unwrap();
         let proof = ProofOfPossession::from_bytes(&proof_bytes).unwrap();
         let verified = key.verify_proof(&proof).unwrap();
         let verified_again = decoded_again.verify_proof(&proof).unwrap();
@@ -105,9 +105,9 @@ mod tests {
 
     #[test]
     fn rejects_a_proof_for_another_key() {
-        let (key_bytes, _) = public_key_and_proof_bytes(scalar(1));
-        let (_, proof_bytes) = public_key_and_proof_bytes(scalar(2));
-        let key = UnverifiedPublicKey::from_bytes(&key_bytes).unwrap();
+        let (key_bytes, _) = public_key_and_proof_bytes(scalar_bytes(1));
+        let (_, proof_bytes) = public_key_and_proof_bytes(scalar_bytes(2));
+        let key = UnprovenPublicKey::from_bytes(&key_bytes).unwrap();
         let proof = ProofOfPossession::from_bytes(&proof_bytes).unwrap();
 
         assert_eq!(
@@ -119,15 +119,15 @@ mod tests {
     #[cfg(blst_simple_dangerous)]
     #[test]
     fn proof_bypass_matches_proof_verified_key_in_aggregate_verification() {
-        let secret = scalar(1);
+        let secret = scalar_bytes(1);
         let (bytes, proof_bytes) = public_key_and_proof_bytes(secret);
-        let unverified = UnverifiedPublicKey::from_bytes(&bytes).unwrap();
+        let unproven = UnprovenPublicKey::from_bytes(&bytes).unwrap();
         let proof = ProofOfPossession::from_bytes(&proof_bytes).unwrap();
-        let proof_verified = unverified.verify_proof(&proof).unwrap();
-        let bypassed = crate::dangerous::assume_proof_verified(unverified);
+        let proof_verified = unproven.verify_proof(&proof).unwrap();
+        let bypassed = crate::dangerous::assume_proof_verified(unproven);
         let message = b"message";
         let first_signature = crate::test_util::signature(secret, message);
-        let (other_key, other_signature) = crate::test_util::participant(scalar(2), message);
+        let (other_key, other_signature) = crate::test_util::participant(scalar_bytes(2), message);
         let mut signatures = crate::AggregateSignatureBuilder::new(&first_signature);
         signatures.add(&other_signature);
         let signature = signatures.finish();
@@ -136,7 +136,7 @@ mod tests {
         let proof_verified_result =
             signature.verify_message_with_keys(&proof_verified_keys, message);
 
-        assert_eq!(&*bypassed, &unverified);
+        assert_eq!(&*bypassed, &unproven);
         assert_eq!(bypassed.to_bytes(), bytes);
         assert!(proof_verified_result);
         assert_eq!(
@@ -147,8 +147,8 @@ mod tests {
 
     #[test]
     fn combined_constructor_preserves_error_context() {
-        let (key_bytes, proof_bytes) = public_key_and_proof_bytes(scalar(1));
-        let (_, wrong_proof) = public_key_and_proof_bytes(scalar(2));
+        let (key_bytes, proof_bytes) = public_key_and_proof_bytes(scalar_bytes(1));
+        let (_, wrong_proof) = public_key_and_proof_bytes(scalar_bytes(2));
         let bad_key = [0; 48];
         let bad_proof = [0; 96];
 

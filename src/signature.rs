@@ -24,7 +24,7 @@ impl Signature {
 
 impl Hash for Signature {
     fn hash<H: Hasher>(&self, state: &mut H) {
-        ffi::hash_g2(&self.point, state);
+        ffi::hash_g2_coordinates(&self.point, state);
     }
 }
 
@@ -33,11 +33,11 @@ mod tests {
     use std::collections::HashMap;
 
     use super::Signature;
-    use crate::test_util::{scalar, signature_bytes};
+    use crate::test_util::{scalar_bytes, signature_bytes};
 
     #[test]
     fn round_trips_a_valid_signature() {
-        let bytes = signature_bytes(scalar(1), b"message");
+        let bytes = signature_bytes(scalar_bytes(1), b"message");
         let signature = Signature::from_bytes(&bytes).unwrap();
         let decoded_again = Signature::from_bytes(&signature.to_bytes()).unwrap();
         let mut signatures = HashMap::new();

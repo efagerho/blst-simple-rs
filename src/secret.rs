@@ -38,7 +38,7 @@ impl SecretKey {
     pub fn from_key_material(key_material: &[u8]) -> Result<Self, KeyMaterialTooShortError> {
         Self::from_key_material_with_parameters(
             key_material,
-            KeyGenerationParameters::compatibility(),
+            KeyGenerationParameters::draft04_compatibility(),
         )
     }
 
@@ -54,15 +54,15 @@ impl SecretKey {
     ) -> Result<Self, KeyMaterialTooShortError> {
         validate_key_material_length(key_material)?;
         Ok(Self {
-            scalar: ffi::derive_key_material(key_material, parameters.salt, parameters.key_info),
+            scalar: ffi::derive_secret_scalar(key_material, parameters.salt, parameters.key_info),
         })
     }
 
     /// Imports a canonical, nonzero big-endian scalar.
-    pub fn from_bytes(bytes: &[u8; 32]) -> Result<Self, SecretKeyError> {
+    pub fn from_bytes(bytes: &[u8; 32]) -> Result<Self, SecretKeyDecodeError> {
         ffi::decode_scalar(bytes)
             .map(|scalar| Self { scalar })
-            .ok_or(SecretKeyError::InvalidEncoding)
+            .ok_or(SecretKeyDecodeError::InvalidEncoding)
     }
 
     /// Exports this scalar as 32 big-endian bytes.
@@ -79,7 +79,7 @@ impl SecretKey {
     /// Derives the corresponding proof-capable public key.
     #[must_use]
     pub fn public_key(&self) -> PublicKey {
-        PublicKey::from_secret(ffi::derive_public_key(&self.scalar))
+        PublicKey::from_secret_derived_point(ffi::derive_public_key(&self.scalar))
     }
 
     /// Hashes and signs arbitrary message bytes.
@@ -127,12 +127,12 @@ impl fmt::Debug for SecretKey {
 /// An error encountered while decoding a serialized secret scalar.
 #[derive(Clone, Copy, Debug, PartialEq, Eq)]
 #[non_exhaustive]
-pub enum SecretKeyError {
+pub enum SecretKeyDecodeError {
     /// The bytes encode zero or a value outside the scalar field.
     InvalidEncoding,
 }
 
-impl fmt::Display for SecretKeyError {
+impl fmt::Display for SecretKeyDecodeError {
     fn fmt(&self, f: &mut fmt::Formatter<'_>) -> fmt::Result {
         match self {
             Self::InvalidEncoding => f.write_str("invalid secret-key encoding"),
@@ -160,7 +160,7 @@ impl fmt::Display for KeyMaterialTooShortError {
     }
 }
 
-impl core::error::Error for SecretKeyError {}
+impl core::error::Error for SecretKeyDecodeError {}
 
 impl core::error::Error for KeyMaterialTooShortError {}
 
@@ -181,9 +181,9 @@ mod tests {
 
     use std::format;
 
-    use super::{KeyMaterialTooShortError, SecretKey, SecretKeyError};
+    use super::{KeyMaterialTooShortError, SecretKey, SecretKeyDecodeError};
     use crate::suite::{PROOF_OF_POSSESSION_DST, SIGNATURE_DST};
-    use crate::test_util::{hex, hex_bytes};
+    use crate::test_util::{decode_hex, decode_hex_array};
     use crate::{HashedMessage, KeyGenerationParameters};
 
     #[test]
@@ -215,16 +215,18 @@ mod tests {
     #[test]
     fn validates_canonical_scalar_encodings() {
         let zero = [0; 32];
-        let order = hex("73eda753299d7d483339d80809a1d80553bda402fffe5bfeffffffff00000001");
-        let largest_valid = hex("73eda753299d7d483339d80809a1d80553bda402fffe5bfeffffffff00000000");
+        let order =
+            decode_hex_array("73eda753299d7d483339d80809a1d80553bda402fffe5bfeffffffff00000001");
+        let largest_valid =
+            decode_hex_array("73eda753299d7d483339d80809a1d80553bda402fffe5bfeffffffff00000000");
 
         assert!(matches!(
             SecretKey::from_bytes(&zero),
-            Err(SecretKeyError::InvalidEncoding)
+            Err(SecretKeyDecodeError::InvalidEncoding)
         ));
         assert!(matches!(
             SecretKey::from_bytes(&order),
-            Err(SecretKeyError::InvalidEncoding)
+            Err(SecretKeyDecodeError::InvalidEncoding)
         ));
 
         let secret_key = SecretKey::from_bytes(&largest_valid).unwrap();
@@ -264,9 +266,9 @@ mod tests {
         for (case_number, (seed, expected_master, child_index, expected_child)) in
             cases.into_iter().enumerate()
         {
-            let seed = hex_bytes(seed);
-            let expected_master = hex(expected_master);
-            let expected_child = hex(expected_child);
+            let seed = decode_hex(seed);
+            let expected_master = decode_hex_array(expected_master);
+            let expected_child = decode_hex_array(expected_child);
             let master = SecretKey::from_key_material(&seed).unwrap();
 
             assert_eq!(
@@ -284,9 +286,10 @@ mod tests {
 
     #[test]
     fn derives_the_public_key() {
-        let scalar = hex("0000000000000000000000000000000000000000000000000000000000000001");
-        let secret_key = SecretKey::from_bytes(&scalar).unwrap();
-        let upstream = blst::min_pk::SecretKey::from_bytes(&scalar).unwrap();
+        let scalar_bytes =
+            decode_hex_array("0000000000000000000000000000000000000000000000000000000000000001");
+        let secret_key = SecretKey::from_bytes(&scalar_bytes).unwrap();
+        let upstream = blst::min_pk::SecretKey::from_bytes(&scalar_bytes).unwrap();
 
         assert_eq!(
             secret_key.public_key().to_bytes(),
@@ -307,10 +310,10 @@ mod tests {
             ),
         ];
 
-        for (case, scalar, message) in cases {
-            let scalar: [u8; 32] = hex(scalar);
-            let secret_key = SecretKey::from_bytes(&scalar).unwrap();
-            let upstream = blst::min_pk::SecretKey::from_bytes(&scalar).unwrap();
+        for (case, scalar_bytes, message) in cases {
+            let scalar_bytes: [u8; 32] = decode_hex_array(scalar_bytes);
+            let secret_key = SecretKey::from_bytes(&scalar_bytes).unwrap();
+            let upstream = blst::min_pk::SecretKey::from_bytes(&scalar_bytes).unwrap();
             let expected = upstream.sign(message, SIGNATURE_DST, b"").to_bytes();
             let hashed = HashedMessage::new(message);
 
@@ -329,9 +332,10 @@ mod tests {
 
     #[test]
     fn proves_possession_of_the_public_key() {
-        let scalar = hex("000000000000000000000000000000000000000000000000000000000000002a");
-        let secret_key = SecretKey::from_bytes(&scalar).unwrap();
-        let upstream = blst::min_pk::SecretKey::from_bytes(&scalar).unwrap();
+        let scalar_bytes =
+            decode_hex_array("000000000000000000000000000000000000000000000000000000000000002a");
+        let secret_key = SecretKey::from_bytes(&scalar_bytes).unwrap();
+        let upstream = blst::min_pk::SecretKey::from_bytes(&scalar_bytes).unwrap();
         let public_key = secret_key.public_key();
         let public_key_bytes = public_key.to_bytes();
         let proof = secret_key.prove_possession();
@@ -345,9 +349,10 @@ mod tests {
 
     #[test]
     fn matches_chia_pop_known_answer_vector() {
-        let scalar = hex("258787ef728c898e43bc76244d70f468c9c7e1338a107b18b42da0d86b663c26");
-        let secret_key = SecretKey::from_bytes(&scalar).unwrap();
-        let expected: [u8; 96] = hex(concat!(
+        let scalar_bytes =
+            decode_hex_array("258787ef728c898e43bc76244d70f468c9c7e1338a107b18b42da0d86b663c26");
+        let secret_key = SecretKey::from_bytes(&scalar_bytes).unwrap();
+        let expected: [u8; 96] = decode_hex_array(concat!(
             "84f709159435f0dc73b3e8bf6c78d85282d19231555a8ee3b6e2573aaf66872d92",
             "03fefa1ef",
             "700e34e7c3f3fb28210100558c6871c53f1ef6055b9f06b0d1abe22ad584ad3b95",
@@ -372,7 +377,7 @@ mod tests {
     #[test]
     fn errors_report_the_rejected_input() {
         assert_eq!(
-            format!("{}", SecretKeyError::InvalidEncoding),
+            format!("{}", SecretKeyDecodeError::InvalidEncoding),
             "invalid secret-key encoding"
         );
         assert_eq!(

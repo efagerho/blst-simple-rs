@@ -7,9 +7,7 @@ use blst_simple_rs::{
     AggregatePublicKey, AggregateVerifier, HashedMessage, PublicKey,
     dangerous::assume_proof_verified,
 };
-use blst_simple_rs::{
-    AggregateSignature, AggregateSignatureBuilder, Signature, UnverifiedPublicKey,
-};
+use blst_simple_rs::{AggregateSignature, AggregateSignatureBuilder, Signature, UnprovenPublicKey};
 use common::decode_hex;
 use common::decode_hex_array;
 #[cfg(blst_simple_dangerous)]
@@ -274,7 +272,7 @@ fn aggregate_verify_at_each_message_rung(input: &AggregateVerifyInput) -> [bool;
     let Some(signature) = decode_aggregate_signature(&input.signature) else {
         return [false; 4];
     };
-    let Some(keys) = decode_public_keys(&input.pubkeys) else {
+    let Some(keys) = decode_keys_assuming_proof_verified(&input.pubkeys) else {
         return [false; 4];
     };
     let Some(messages) = input
@@ -316,7 +314,7 @@ fn fast_aggregate_verify_at_each_entry_point(
     let Some(signature) = decode_aggregate_signature(&input.signature) else {
         return failed_fast_aggregate_verification();
     };
-    let Some(keys) = decode_public_keys(&input.pubkeys) else {
+    let Some(keys) = decode_keys_assuming_proof_verified(&input.pubkeys) else {
         return failed_fast_aggregate_verification();
     };
     let Some(message) = decode_hex(&input.message) else {
@@ -326,7 +324,7 @@ fn fast_aggregate_verify_at_each_entry_point(
 }
 
 fn verify_at_each_entry_point(input: &VerifyInput) -> [(&'static str, bool); 3] {
-    let Some(public_key) = decode_unverified_public_key(&input.pubkey) else {
+    let Some(public_key) = decode_unproven_public_key(&input.pubkey) else {
         return failed_single_verification();
     };
     let Some(signature) =
@@ -347,24 +345,24 @@ fn decode_aggregate_signature(input: &str) -> Option<AggregateSignature> {
 }
 
 #[cfg(blst_simple_dangerous)]
-fn decode_public_keys(inputs: &[String]) -> Option<Vec<PublicKey>> {
+fn decode_keys_assuming_proof_verified(inputs: &[String]) -> Option<Vec<PublicKey>> {
     inputs
         .iter()
-        .map(|input| decode_public_key(input))
+        .map(|input| decode_key_assuming_proof_verified(input))
         .collect()
 }
 
 #[cfg(blst_simple_dangerous)]
-fn decode_public_key(input: &str) -> Option<PublicKey> {
-    let key = decode_unverified_public_key(input)?;
+fn decode_key_assuming_proof_verified(input: &str) -> Option<PublicKey> {
+    let key = decode_unproven_public_key(input)?;
 
     // The aggregate fixtures omit proofs and supply expected pairing results.
     Some(assume_proof_verified(key))
 }
 
-fn decode_unverified_public_key(input: &str) -> Option<UnverifiedPublicKey> {
+fn decode_unproven_public_key(input: &str) -> Option<UnprovenPublicKey> {
     let bytes = decode_hex_array(input)?;
-    UnverifiedPublicKey::from_bytes(&bytes).ok()
+    UnprovenPublicKey::from_bytes(&bytes).ok()
 }
 
 fn parse<T: DeserializeOwned>(fixture: &Fixture) -> T {

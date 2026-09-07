@@ -2,7 +2,7 @@ use core::fmt;
 use core::hash::{Hash, Hasher};
 
 use crate::ffi::{self, G1Affine, G1Projective, G2Affine, G2Projective};
-use crate::{AggregateError, DecodeError, PublicKey, Signature};
+use crate::{DecodeError, PublicKey, PublicKeyAggregationError, Signature};
 
 /// A decoded aggregate signature in G2.
 #[derive(Clone, Copy, Debug, PartialEq, Eq)]
@@ -26,7 +26,7 @@ impl AggregateSignature {
 
 impl Hash for AggregateSignature {
     fn hash<H: Hasher>(&self, state: &mut H) {
-        ffi::hash_g2(&self.point, state);
+        ffi::hash_g2_coordinates(&self.point, state);
     }
 }
 
@@ -121,9 +121,9 @@ pub struct AggregatePublicKey {
 impl AggregatePublicKey {
     /// Aggregates a key slice, returning an error for empty input or when the
     /// sum cancels to the identity.
-    pub fn from_keys(keys: &[PublicKey]) -> Result<Self, AggregateError> {
+    pub fn from_keys(keys: &[PublicKey]) -> Result<Self, PublicKeyAggregationError> {
         let Some((first, rest)) = keys.split_first() else {
-            return Err(AggregateError::EmptyInput);
+            return Err(PublicKeyAggregationError::EmptyInput);
         };
 
         let mut builder = AggregatePublicKeyBuilder::new(first);
@@ -134,7 +134,7 @@ impl AggregatePublicKey {
 
 impl Hash for AggregatePublicKey {
     fn hash<H: Hasher>(&self, state: &mut H) {
-        ffi::hash_g1(&self.point, state);
+        ffi::hash_g1_coordinates(&self.point, state);
     }
 }
 
@@ -142,7 +142,7 @@ impl From<&PublicKey> for AggregatePublicKey {
     /// Converts one proof-verified public key into a one-element aggregate.
     fn from(key: &PublicKey) -> Self {
         Self {
-            point: key.unverified.point,
+            point: key.unproven.point,
         }
     }
 }
@@ -165,7 +165,7 @@ impl AggregatePublicKeyBuilder {
     #[must_use]
     pub fn new(first: &PublicKey) -> Self {
         Self {
-            point: ffi::g1_from_affine(&first.unverified.point),
+            point: ffi::g1_from_affine(&first.unproven.point),
         }
     }
 
@@ -179,7 +179,7 @@ impl AggregatePublicKeyBuilder {
 
     /// Adds one proof-verified public key.
     pub fn add(&mut self, key: &PublicKey) {
-        ffi::add_g1_affine(&mut self.point, &key.unverified.point);
+        ffi::add_g1_affine(&mut self.point, &key.unproven.point);
     }
 
     /// Adds one existing aggregate public key.
@@ -202,9 +202,9 @@ impl AggregatePublicKeyBuilder {
     }
 
     /// Finishes the aggregate, rejecting a sum that is the identity.
-    pub fn finish(self) -> Result<AggregatePublicKey, AggregateError> {
+    pub fn finish(self) -> Result<AggregatePublicKey, PublicKeyAggregationError> {
         if ffi::g1_is_identity(&self.point) {
-            return Err(AggregateError::KeysCancelToIdentity);
+            return Err(PublicKeyAggregationError::KeysCancelToIdentity);
         }
 
         Ok(AggregatePublicKey {
@@ -231,8 +231,8 @@ mod tests {
         AggregateSignatureBuilder,
     };
     use crate::ffi;
-    use crate::test_util::{hex, public_key, scalar, signature};
-    use crate::{AggregateError, PublicKey, Signature};
+    use crate::test_util::{decode_hex_array, public_key, scalar_bytes, signature};
+    use crate::{PublicKey, PublicKeyAggregationError, Signature};
 
     fn upstream_signature_sum(signatures: &[Signature]) -> [u8; 96] {
         let signatures: Vec<_> = signatures
@@ -262,8 +262,8 @@ mod tests {
 
     #[test]
     fn aggregates_signatures_with_complete_addition() {
-        let first = signature(scalar(1), b"message");
-        let second = signature(scalar(2), b"message");
+        let first = signature(scalar_bytes(1), b"message");
+        let second = signature(scalar_bytes(2), b"message");
 
         let mut builder = AggregateSignatureBuilder::new(&first);
         builder.add(&second);
@@ -289,10 +289,10 @@ mod tests {
     #[test]
     fn combines_aggregate_signatures() {
         let signatures = [
-            signature(scalar(1), b"one"),
-            signature(scalar(2), b"two"),
-            signature(scalar(3), b"three"),
-            signature(scalar(4), b"four"),
+            signature(scalar_bytes(1), b"one"),
+            signature(scalar_bytes(2), b"two"),
+            signature(scalar_bytes(3), b"three"),
+            signature(scalar_bytes(4), b"four"),
         ];
 
         let mut left = AggregateSignatureBuilder::new(&signatures[0]);
@@ -315,7 +315,7 @@ mod tests {
 
     #[test]
     fn empty_signature_extensions_are_noops() {
-        let signature = signature(scalar(1), b"message");
+        let signature = signature(scalar_bytes(1), b"message");
         let expected = AggregateSignature::from(&signature);
         let mut identity_bytes = [0; 96];
         identity_bytes[0] = 0xc0;
@@ -336,8 +336,8 @@ mod tests {
 
     #[test]
     fn decodes_aggregate_signatures_and_allows_identity() {
-        let first = signature(scalar(1), b"one");
-        let second = signature(scalar(2), b"two");
+        let first = signature(scalar_bytes(1), b"one");
+        let second = signature(scalar_bytes(2), b"two");
         let mut builder = AggregateSignatureBuilder::new(&first);
         builder.add(&second);
         let aggregate = builder.finish();
@@ -361,8 +361,8 @@ mod tests {
 
     #[test]
     fn aggregates_public_keys_with_complete_addition() {
-        let first = public_key(scalar(1));
-        let second = public_key(scalar(2));
+        let first = public_key(scalar_bytes(1));
+        let second = public_key(scalar_bytes(2));
         let keys = [first, second];
         let expected = upstream_key_sum(&keys);
 
@@ -386,17 +386,17 @@ mod tests {
         );
         assert_eq!(
             AggregatePublicKey::from_keys(&[]),
-            Err(AggregateError::EmptyInput)
+            Err(PublicKeyAggregationError::EmptyInput)
         );
     }
 
     #[test]
     fn combines_aggregate_public_keys() {
         let keys = [
-            public_key(scalar(1)),
-            public_key(scalar(2)),
-            public_key(scalar(3)),
-            public_key(scalar(4)),
+            public_key(scalar_bytes(1)),
+            public_key(scalar_bytes(2)),
+            public_key(scalar_bytes(3)),
+            public_key(scalar_bytes(4)),
         ];
         let left = AggregatePublicKey::from_keys(&keys[..2]).unwrap();
         let right = AggregatePublicKey::from_keys(&keys[2..]).unwrap();
@@ -418,7 +418,7 @@ mod tests {
 
     #[test]
     fn one_key_and_empty_extensions_preserve_the_key() {
-        let key = public_key(scalar(1));
+        let key = public_key(scalar_bytes(1));
         let expected = AggregatePublicKey::from(&key);
         let mut builder = AggregatePublicKeyBuilder::new(&key);
 
@@ -432,25 +432,28 @@ mod tests {
 
     #[test]
     fn rejects_public_keys_that_cancel_to_identity() {
-        let generator = public_key(scalar(1));
-        let negative_generator = public_key(hex(
+        let generator = public_key(scalar_bytes(1));
+        let negative_generator = public_key(decode_hex_array(
             "73eda753299d7d483339d80809a1d80553bda402fffe5bfeffffffff00000000",
         ));
 
         assert_eq!(
             AggregatePublicKey::from_keys(&[generator, negative_generator]),
-            Err(AggregateError::KeysCancelToIdentity)
+            Err(PublicKeyAggregationError::KeysCancelToIdentity)
         );
 
         let mut builder = AggregatePublicKeyBuilder::new(&generator);
         builder.add(&negative_generator);
-        assert_eq!(builder.finish(), Err(AggregateError::KeysCancelToIdentity));
+        assert_eq!(
+            builder.finish(),
+            Err(PublicKeyAggregationError::KeysCancelToIdentity)
+        );
     }
 
     #[test]
     fn builder_debug_omits_curve_points() {
-        let signature = signature(scalar(1), b"message");
-        let key = public_key(scalar(1));
+        let signature = signature(scalar_bytes(1), b"message");
+        let key = public_key(scalar_bytes(1));
 
         assert_eq!(
             format!("{:?}", AggregateSignatureBuilder::new(&signature)),

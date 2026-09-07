@@ -16,13 +16,13 @@ pub(crate) const MILLER_LOOP_BATCH_SIZE: usize = 16;
 #[cfg(feature = "signing")]
 pub(crate) type Scalar = blst::blst_scalar;
 
-pub(crate) fn hash_g1<H: Hasher>(point: &G1Affine, state: &mut H) {
+pub(crate) fn hash_g1_coordinates<H: Hasher>(point: &G1Affine, state: &mut H) {
     for coordinate in [&point.x, &point.y] {
         coordinate.l.hash(state);
     }
 }
 
-pub(crate) fn hash_g2<H: Hasher>(point: &G2Affine, state: &mut H) {
+pub(crate) fn hash_g2_coordinates<H: Hasher>(point: &G2Affine, state: &mut H) {
     for coordinate in [&point.x, &point.y] {
         for component in &coordinate.fp {
             component.l.hash(state);
@@ -229,7 +229,7 @@ pub(crate) fn g2_to_affine(point: &G2Projective) -> G2Affine {
     }
 }
 
-fn g2_is_identity(point: &G2Affine) -> bool {
+fn g2_affine_is_identity(point: &G2Affine) -> bool {
     // SAFETY: `point` is initialized and valid for this read-only predicate.
     unsafe { blst::blst_p2_affine_is_inf(point) }
 }
@@ -239,7 +239,7 @@ pub(crate) fn verify_signature(key: &G1Affine, message: &G2Affine, signature: &G
     verify_miller_loop_product(&product, signature)
 }
 
-pub(crate) fn verify_prepared_signature(
+pub(crate) fn verify_signature_with_prepared_message(
     key: &G1Affine,
     message: &PreparedLines,
     signature: &G2Affine,
@@ -271,7 +271,9 @@ pub(crate) fn miller_loop_many(keys: &[G1Affine], messages: &[G2Affine]) -> Mill
         "miller-loop keys must not contain the identity"
     );
     assert!(
-        messages.iter().all(|message| !g2_is_identity(message)),
+        messages
+            .iter()
+            .all(|message| !g2_affine_is_identity(message)),
         "miller-loop messages must not contain the identity"
     );
 
@@ -341,12 +343,12 @@ pub(crate) fn derive_public_key(scalar: &Scalar) -> G1Affine {
 #[cfg(feature = "signing")]
 pub(crate) fn sign_message(scalar: &Scalar, message: &[u8]) -> G2Affine {
     let message = hash_to_g2_projective(message, SIGNATURE_DST);
-    sign_projective(scalar, &message)
+    sign_projective_message(scalar, &message)
 }
 
 #[cfg(feature = "signing")]
 pub(crate) fn sign_hashed_message(scalar: &Scalar, message: &G2Affine) -> G2Affine {
-    sign_projective(scalar, &g2_from_affine(message))
+    sign_projective_message(scalar, &g2_from_affine(message))
 }
 
 #[cfg(feature = "signing")]
@@ -354,11 +356,11 @@ pub(crate) fn prove_possession(scalar: &Scalar) -> G2Affine {
     let public_key = derive_public_key(scalar);
     let public_key = compress_g1(&public_key);
     let message = hash_to_g2_projective(&public_key, PROOF_OF_POSSESSION_DST);
-    sign_projective(scalar, &message)
+    sign_projective_message(scalar, &message)
 }
 
 #[cfg(feature = "signing")]
-fn sign_projective(scalar: &Scalar, message: &blst::blst_p2) -> G2Affine {
+fn sign_projective_message(scalar: &Scalar, message: &blst::blst_p2) -> G2Affine {
     let mut signature = MaybeUninit::<G2Affine>::uninit();
 
     // SAFETY: `message` and `scalar` are initialized. BLST permits a null
@@ -396,7 +398,7 @@ pub(crate) fn encode_scalar(scalar: &blst::blst_scalar) -> [u8; 32] {
 }
 
 #[cfg(feature = "signing")]
-pub(crate) fn derive_key_material(key_material: &[u8], salt: &[u8], key_info: &[u8]) -> Scalar {
+pub(crate) fn derive_secret_scalar(key_material: &[u8], salt: &[u8], key_info: &[u8]) -> Scalar {
     assert!(key_material.len() >= 32, "key material is too short");
     assert!(
         key_info.len() <= crate::keygen::MAX_KEY_INFO_LENGTH,
@@ -606,7 +608,7 @@ mod tests {
     #[test]
     #[should_panic(expected = "key material is too short")]
     fn rejects_invalid_internal_key_material() {
-        super::derive_key_material(b"", b"", b"");
+        super::derive_secret_scalar(b"", b"", b"");
     }
 
     #[cfg(feature = "signing")]
@@ -615,6 +617,6 @@ mod tests {
     fn rejects_oversized_internal_key_info() {
         let key_info = [0; crate::keygen::MAX_KEY_INFO_LENGTH + 1];
 
-        super::derive_key_material(&[42; 32], b"", &key_info);
+        super::derive_secret_scalar(&[42; 32], b"", &key_info);
     }
 }

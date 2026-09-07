@@ -1,6 +1,6 @@
 mod common;
 
-use blst_simple_rs::{Signature, UnverifiedPublicKey};
+use blst_simple_rs::{Signature, UnprovenPublicKey};
 use common::{
     decode_hex, decode_hex_array, failed_single_verification, verify_single_at_each_entry_point,
 };
@@ -95,7 +95,7 @@ fn verify_at_each_entry_point(
     let Some(signature) = decode_hex_array(signature) else {
         return failed_single_verification();
     };
-    let Ok(public_key) = UnverifiedPublicKey::from_bytes(&public_key) else {
+    let Ok(public_key) = UnprovenPublicKey::from_bytes(&public_key) else {
         return failed_single_verification();
     };
     let Ok(signature) = Signature::from_bytes(&signature) else {
