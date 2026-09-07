@@ -21,10 +21,12 @@ impl HashedMessage {
 
     /// Precomputes reusable Miller-loop line coefficients for this message.
     ///
-    /// Preparation pays off from the second verification of the same message
-    /// onward. For a message verified once, verify the [`HashedMessage`]
-    /// directly: BLST performs this same precomputation internally, so
-    /// preparing first does identical work plus a heap allocation.
+    /// Preparation lets later verifications reuse these coefficients, but the
+    /// performance crossover depends on the workload. In particular, aggregate
+    /// verification can batch distinct hashed messages, while prepared messages
+    /// are processed individually. Benchmark representative workloads. For one
+    /// verification, using the [`HashedMessage`] directly avoids this method's
+    /// heap allocation.
     #[must_use]
     pub fn prepare(&self) -> PreparedMessage {
         PreparedMessage {
@@ -54,8 +56,8 @@ pub struct PreparedMessage {
 impl PreparedMessage {
     /// Hashes a message and prepares its line coefficients in one allocation.
     ///
-    /// As with [`HashedMessage::prepare`], this pays off only when the message
-    /// is verified more than once.
+    /// As with [`HashedMessage::prepare`], whether preparation pays off depends
+    /// on the verification workload.
     #[must_use]
     pub fn hash_and_prepare(message: &[u8]) -> Self {
         HashedMessage::new(message).prepare()
