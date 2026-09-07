@@ -72,14 +72,14 @@ impl fmt::Display for ProofVerificationError {
 /// An error encountered while constructing an aggregate public key.
 #[derive(Clone, Copy, Debug, PartialEq, Eq)]
 #[non_exhaustive]
-pub enum AggregateError {
+pub enum PublicKeyAggregationError {
     /// No public keys were supplied.
     EmptyInput,
     /// The supplied public keys cancel to the identity.
     KeysCancelToIdentity,
 }
 
-impl fmt::Display for AggregateError {
+impl fmt::Display for PublicKeyAggregationError {
     fn fmt(&self, f: &mut fmt::Formatter<'_>) -> fmt::Result {
         match self {
             Self::EmptyInput => f.write_str("cannot aggregate an empty public-key slice"),
@@ -119,7 +119,7 @@ impl core::error::Error for ProofVerificationError {
     }
 }
 
-impl core::error::Error for AggregateError {}
+impl core::error::Error for PublicKeyAggregationError {}
 
 impl core::error::Error for TooManyDistinctMessagesError {}
 
@@ -130,7 +130,7 @@ mod tests {
     use std::format;
 
     use super::{
-        AggregateError, DecodeError, InvalidProofError, ProofVerificationError,
+        DecodeError, InvalidProofError, ProofVerificationError, PublicKeyAggregationError,
         TooManyDistinctMessagesError,
     };
 
@@ -185,12 +185,12 @@ mod tests {
             ),
             (
                 "empty aggregate",
-                format!("{}", AggregateError::EmptyInput),
+                format!("{}", PublicKeyAggregationError::EmptyInput),
                 "cannot aggregate an empty public-key slice",
             ),
             (
                 "key cancellation",
-                format!("{}", AggregateError::KeysCancelToIdentity),
+                format!("{}", PublicKeyAggregationError::KeysCancelToIdentity),
                 "public keys cancel to the identity",
             ),
             (

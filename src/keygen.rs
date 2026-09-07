@@ -16,7 +16,7 @@ use core::fmt;
 pub const MAX_KEY_INFO_LENGTH: usize = 1024;
 
 /// `SHA-256("BLS-SIG-KEYGEN-SALT-")`.
-const COMPATIBILITY_SALT: [u8; 32] = [
+const DRAFT04_COMPATIBILITY_SALT: [u8; 32] = [
     0xaf, 0xf1, 0xb7, 0x03, 0x64, 0x7f, 0xe4, 0xbd, 0x43, 0x3a, 0x89, 0x3a, 0x3d, 0x2b, 0xa5, 0x1a,
     0xbe, 0x26, 0xef, 0x79, 0x4a, 0x83, 0x56, 0xfe, 0xa6, 0x2e, 0x8e, 0x7c, 0x7c, 0x87, 0x75, 0x46,
 ];
@@ -66,8 +66,8 @@ impl<'a> KeyGenerationParameters<'a> {
     /// Use [`Self::with_info`] to retain that salt while supplying application
     /// context.
     #[must_use]
-    pub const fn compatibility() -> Self {
-        Self::new(&COMPATIBILITY_SALT)
+    pub const fn draft04_compatibility() -> Self {
+        Self::new(&DRAFT04_COMPATIBILITY_SALT)
     }
 }
 
@@ -107,7 +107,8 @@ mod tests {
     use std::format;
 
     use super::{
-        COMPATIBILITY_SALT, KeyGenerationParameters, KeyInfoTooLongError, MAX_KEY_INFO_LENGTH,
+        DRAFT04_COMPATIBILITY_SALT, KeyGenerationParameters, KeyInfoTooLongError,
+        MAX_KEY_INFO_LENGTH,
     };
     use crate::SecretKey;
 
@@ -141,7 +142,7 @@ mod tests {
         let default = SecretKey::from_key_material(&key_material).unwrap();
         let explicit = SecretKey::from_key_material_with_parameters(
             &key_material,
-            KeyGenerationParameters::compatibility(),
+            KeyGenerationParameters::draft04_compatibility(),
         )
         .unwrap();
 
@@ -149,14 +150,17 @@ mod tests {
 
         let with_info = SecretKey::from_key_material_with_parameters(
             &key_material,
-            KeyGenerationParameters::compatibility()
+            KeyGenerationParameters::draft04_compatibility()
                 .with_info(&context)
                 .unwrap(),
         )
         .unwrap();
-        let expected =
-            blst::min_pk::SecretKey::key_gen_v5(&key_material, &COMPATIBILITY_SALT, &context)
-                .unwrap();
+        let expected = blst::min_pk::SecretKey::key_gen_v5(
+            &key_material,
+            &DRAFT04_COMPATIBILITY_SALT,
+            &context,
+        )
+        .unwrap();
 
         assert_eq!(with_info.to_bytes(), expected.to_bytes());
     }
@@ -200,7 +204,7 @@ mod tests {
     }
 
     #[test]
-    fn key_info_error_reports_both_limits() {
+    fn key_info_error_reports_supplied_and_maximum_lengths() {
         let error = KeyInfoTooLongError {
             supplied: MAX_KEY_INFO_LENGTH + 1,
             maximum: MAX_KEY_INFO_LENGTH,

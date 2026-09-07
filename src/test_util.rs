@@ -3,10 +3,10 @@ use std::vec::Vec;
 use crate::suite::{PROOF_OF_POSSESSION_DST, SIGNATURE_DST};
 use crate::{PublicKey, Signature};
 
-pub(crate) fn scalar(value: u8) -> [u8; 32] {
-    let mut scalar = [0; 32];
-    scalar[31] = value;
-    scalar
+pub(crate) fn scalar_bytes(value: u8) -> [u8; 32] {
+    let mut scalar_bytes = [0; 32];
+    scalar_bytes[31] = value;
+    scalar_bytes
 }
 
 pub(crate) fn signature(secret: [u8; 32], message: &[u8]) -> Signature {
@@ -33,11 +33,11 @@ pub(crate) fn participant(secret: [u8; 32], message: &[u8]) -> (PublicKey, Signa
     )
 }
 
-pub(crate) fn hex<const N: usize>(input: &str) -> [u8; N] {
-    hex_bytes(input).try_into().unwrap()
+pub(crate) fn decode_hex_array<const N: usize>(input: &str) -> [u8; N] {
+    decode_hex(input).try_into().unwrap()
 }
 
-pub(crate) fn hex_bytes(input: &str) -> Vec<u8> {
+pub(crate) fn decode_hex(input: &str) -> Vec<u8> {
     let input = input.strip_prefix("0x").unwrap_or(input);
     assert_eq!(input.len() % 2, 0);
 

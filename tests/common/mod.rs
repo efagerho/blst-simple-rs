@@ -1,13 +1,13 @@
 #[cfg(blst_simple_dangerous)]
 use blst_simple_rs::{AggregatePublicKey, AggregateSignature, AggregateVerifier, PublicKey};
-use blst_simple_rs::{HashedMessage, Signature, UnverifiedPublicKey};
+use blst_simple_rs::{HashedMessage, Signature, UnprovenPublicKey};
 
 pub fn decode_hex_array<const N: usize>(input: &str) -> Option<[u8; N]> {
     decode_hex(input)?.try_into().ok()
 }
 
 pub fn verify_single_at_each_entry_point(
-    key: &UnverifiedPublicKey,
+    key: &UnprovenPublicKey,
     message: &[u8],
     signature: &Signature,
 ) -> [(&'static str, bool); 3] {

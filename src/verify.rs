@@ -7,7 +7,7 @@ use crate::ffi::{
 };
 use crate::{
     AggregatePublicKey, AggregateSignature, HashedMessage, PreparedMessage, PublicKey, Signature,
-    TooManyDistinctMessagesError, UnverifiedPublicKey,
+    TooManyDistinctMessagesError, UnprovenPublicKey,
 };
 
 impl Signature {
@@ -16,20 +16,20 @@ impl Signature {
     /// Proof of possession is not required because no public keys are
     /// aggregated.
     #[must_use]
-    pub fn verify_message(&self, key: &UnverifiedPublicKey, message: &[u8]) -> bool {
+    pub fn verify_message(&self, key: &UnprovenPublicKey, message: &[u8]) -> bool {
         self.verify(key, &HashedMessage::new(message))
     }
 
     /// Verifies a previously hashed message for one signer.
     #[must_use]
-    pub fn verify(&self, key: &UnverifiedPublicKey, message: &HashedMessage) -> bool {
+    pub fn verify(&self, key: &UnprovenPublicKey, message: &HashedMessage) -> bool {
         ffi::verify_signature(&key.point, &message.point, &self.point)
     }
 
     /// Verifies a prepared message for one signer.
     #[must_use]
-    pub fn verify_prepared(&self, key: &UnverifiedPublicKey, message: &PreparedMessage) -> bool {
-        ffi::verify_prepared_signature(&key.point, &message.lines, &self.point)
+    pub fn verify_prepared(&self, key: &UnprovenPublicKey, message: &PreparedMessage) -> bool {
+        ffi::verify_signature_with_prepared_message(&key.point, &message.lines, &self.point)
     }
 }
 
@@ -49,7 +49,7 @@ impl AggregateSignature {
     /// Verifies one prepared message against an aggregate public key.
     #[must_use]
     pub fn verify_prepared(&self, key: &AggregatePublicKey, message: &PreparedMessage) -> bool {
-        ffi::verify_prepared_signature(&key.point, &message.lines, &self.point)
+        ffi::verify_signature_with_prepared_message(&key.point, &message.lines, &self.point)
     }
 
     /// Hashes and verifies one message after aggregating the supplied keys.
@@ -173,53 +173,53 @@ fn verify_group_slice<M: PairingMessage>(
 }
 
 struct PairingAccumulator {
-    accumulator: MillerLoopResult,
+    product: MillerLoopResult,
     staged_keys: [G1Affine; MILLER_LOOP_BATCH_SIZE],
     staged_messages: [G2Affine; MILLER_LOOP_BATCH_SIZE],
-    staged: usize,
+    staged_count: usize,
 }
 
 impl PairingAccumulator {
     fn new() -> Self {
         Self {
-            accumulator: MillerLoopResult::default(),
+            product: MillerLoopResult::default(),
             staged_keys: [G1Affine::default(); MILLER_LOOP_BATCH_SIZE],
             staged_messages: [G2Affine::default(); MILLER_LOOP_BATCH_SIZE],
-            staged: 0,
+            staged_count: 0,
         }
     }
 
     fn add(&mut self, key: &G1Affine, message: &G2Affine) {
-        self.staged_keys[self.staged] = *key;
-        self.staged_messages[self.staged] = *message;
-        self.staged += 1;
+        self.staged_keys[self.staged_count] = *key;
+        self.staged_messages[self.staged_count] = *message;
+        self.staged_count += 1;
 
-        if self.staged == MILLER_LOOP_BATCH_SIZE {
+        if self.staged_count == MILLER_LOOP_BATCH_SIZE {
             self.flush();
         }
     }
 
-    fn add_prepared(&mut self, key: &G1Affine, message: &PreparedLines) {
-        let term = ffi::miller_loop_prepared(key, message);
-        self.accumulator *= term;
+    fn add_prepared(&mut self, key: &G1Affine, message_lines: &PreparedLines) {
+        let term = ffi::miller_loop_prepared(key, message_lines);
+        self.product *= term;
     }
 
     fn verify(mut self, signature: &G2Affine) -> bool {
         self.flush();
-        ffi::verify_miller_loop_product(&self.accumulator, signature)
+        ffi::verify_miller_loop_product(&self.product, signature)
     }
 
     fn flush(&mut self) {
-        if self.staged == 0 {
+        if self.staged_count == 0 {
             return;
         }
 
         let term = ffi::miller_loop_many(
-            &self.staged_keys[..self.staged],
-            &self.staged_messages[..self.staged],
+            &self.staged_keys[..self.staged_count],
+            &self.staged_messages[..self.staged_count],
         );
-        self.accumulator *= term;
-        self.staged = 0;
+        self.product *= term;
+        self.staged_count = 0;
     }
 }
 
@@ -244,7 +244,7 @@ pub struct AggregateVerifier {
 }
 
 struct MessageGroup {
-    key: G1Projective,
+    key_sum: G1Projective,
     prepared_lines: Option<Arc<PreparedLines>>,
 }
 
@@ -354,13 +354,13 @@ impl AggregateVerifier {
             || self
                 .groups
                 .values()
-                .any(|group| ffi::g1_is_identity(&group.key))
+                .any(|group| ffi::g1_is_identity(&group.key_sum))
         {
             false
         } else {
             let mut pairings = PairingAccumulator::new();
             for (message, group) in &self.groups {
-                let key = ffi::g1_to_affine(&group.key);
+                let key = ffi::g1_to_affine(&group.key_sum);
                 if let Some(lines) = &group.prepared_lines {
                     pairings.add_prepared(&key, lines);
                 } else {
@@ -400,7 +400,7 @@ impl AggregateVerifier {
         match self.groups.entry(*message) {
             Entry::Occupied(mut entry) => {
                 let group = entry.get_mut();
-                ffi::add_g1_affine(&mut group.key, &key.point);
+                ffi::add_g1_affine(&mut group.key_sum, &key.point);
                 if group.prepared_lines.is_none() {
                     group.prepared_lines = prepared_lines.cloned();
                 }
@@ -412,7 +412,7 @@ impl AggregateVerifier {
             }
             Entry::Vacant(entry) => {
                 entry.insert(MessageGroup {
-                    key: ffi::g1_from_affine(&key.point),
+                    key_sum: ffi::g1_from_affine(&key.point),
                     prepared_lines: prepared_lines.cloned(),
                 });
                 Ok(())
@@ -435,7 +435,7 @@ mod tests {
 
     use super::AggregateVerifier;
     use crate::ffi::MILLER_LOOP_BATCH_SIZE;
-    use crate::test_util::{hex, participant, scalar};
+    use crate::test_util::{decode_hex_array, participant, scalar_bytes};
     use crate::{
         AggregatePublicKey, AggregateSignature, AggregateSignatureBuilder, HashedMessage,
         Signature, TooManyDistinctMessagesError,
@@ -450,8 +450,8 @@ mod tests {
 
     #[test]
     fn verifies_empty_message_buffers() {
-        let (first_key, first_signature) = participant(scalar(1), b"");
-        let (second_key, second_signature) = participant(scalar(2), b"");
+        let (first_key, first_signature) = participant(scalar_bytes(1), b"");
+        let (second_key, second_signature) = participant(scalar_bytes(2), b"");
 
         assert!(first_signature.verify_message(&first_key, b""));
 
@@ -465,8 +465,8 @@ mod tests {
 
     #[test]
     fn verifies_single_signatures_at_every_message_rung() {
-        let (key, signature) = participant(scalar(1), b"message");
-        let (other_key, _) = participant(scalar(2), b"message");
+        let (key, signature) = participant(scalar_bytes(1), b"message");
+        let (other_key, _) = participant(scalar_bytes(2), b"message");
         let message = HashedMessage::new(b"message");
         let prepared = message.prepare();
         let wrong_message = HashedMessage::new(b"wrong message");
@@ -487,8 +487,8 @@ mod tests {
     #[test]
     fn verifies_fast_aggregates_at_every_message_rung() {
         let message_bytes = b"shared message";
-        let (first_key, first_signature) = participant(scalar(1), message_bytes);
-        let (second_key, second_signature) = participant(scalar(2), message_bytes);
+        let (first_key, first_signature) = participant(scalar_bytes(1), message_bytes);
+        let (second_key, second_signature) = participant(scalar_bytes(2), message_bytes);
         let keys = [first_key, second_key];
         let signature = aggregate_signatures(&[first_signature, second_signature]);
         let key = AggregatePublicKey::from_keys(&keys).unwrap();
@@ -522,7 +522,7 @@ mod tests {
     #[test]
     fn verifies_one_element_aggregates() {
         let message_bytes = b"message";
-        let (key, signature) = participant(scalar(1), message_bytes);
+        let (key, signature) = participant(scalar_bytes(1), message_bytes);
         let keys = [key];
         let aggregate_key = AggregatePublicKey::from(key);
         let aggregate_signature = AggregateSignature::from(signature);
@@ -540,9 +540,9 @@ mod tests {
     }
 
     #[test]
-    fn identity_aggregate_signature_never_verifies() {
+    fn rejects_identity_signature_for_one_key() {
         let message_bytes = b"message";
-        let (key, _) = participant(scalar(1), message_bytes);
+        let (key, _) = participant(scalar_bytes(1), message_bytes);
         let keys = [key];
         let aggregate_key = AggregatePublicKey::from(key);
         let message = HashedMessage::new(message_bytes);
@@ -570,9 +570,9 @@ mod tests {
 
     #[test]
     fn verifies_multi_message_group_slices() {
-        let (first_key, first_signature) = participant(scalar(1), b"one");
-        let (second_key, second_signature) = participant(scalar(2), b"two");
-        let (third_key, third_signature) = participant(scalar(3), b"one");
+        let (first_key, first_signature) = participant(scalar_bytes(1), b"one");
+        let (second_key, second_signature) = participant(scalar_bytes(2), b"two");
+        let (third_key, third_signature) = participant(scalar_bytes(3), b"one");
         let signature = aggregate_signatures(&[first_signature, second_signature, third_signature]);
         let keys = [
             AggregatePublicKey::from(first_key),
@@ -630,7 +630,7 @@ mod tests {
 
         for value in 1..=33 {
             let message = [value];
-            let (key, signature) = participant(scalar(value), &message);
+            let (key, signature) = participant(scalar_bytes(value), &message);
             keys.push(AggregatePublicKey::from(key));
             messages.push(HashedMessage::new(&message));
             signatures.push(signature);
@@ -701,7 +701,7 @@ mod tests {
 
     #[test]
     fn streaming_verifier_shares_one_preparation_per_message_until_completion() {
-        let (key, signature) = participant(scalar(1), b"message");
+        let (key, signature) = participant(scalar_bytes(1), b"message");
         let key = AggregatePublicKey::from(key);
         let signature = aggregate_signatures(&[signature; 4]);
         let message = HashedMessage::new(b"message");
@@ -735,9 +735,9 @@ mod tests {
     #[test]
     fn verification_rejects_identity_equal_message_key_sums() {
         let message_bytes = b"shared message";
-        let (first_key, first_signature) = participant(scalar(1), message_bytes);
+        let (first_key, first_signature) = participant(scalar_bytes(1), message_bytes);
         let (inverse_key, inverse_signature) = participant(
-            hex("73eda753299d7d483339d80809a1d80553bda402fffe5bfeffffffff00000000"),
+            decode_hex_array("73eda753299d7d483339d80809a1d80553bda402fffe5bfeffffffff00000000"),
             message_bytes,
         );
         let signature = aggregate_signatures(&[first_signature, inverse_signature]);
@@ -793,9 +793,9 @@ mod tests {
     #[test]
     fn streaming_grouping_rejects_cancellation_after_many_distinct_messages() {
         let shared_message = b"shared message";
-        let (first_key, first_signature) = participant(scalar(1), shared_message);
+        let (first_key, first_signature) = participant(scalar_bytes(1), shared_message);
         let (inverse_key, inverse_signature) = participant(
-            hex("73eda753299d7d483339d80809a1d80553bda402fffe5bfeffffffff00000000"),
+            decode_hex_array("73eda753299d7d483339d80809a1d80553bda402fffe5bfeffffffff00000000"),
             shared_message,
         );
         let shared_message = HashedMessage::new(shared_message);
@@ -808,7 +808,7 @@ mod tests {
 
         for value in 2..=MILLER_LOOP_BATCH_SIZE as u8 {
             let message_bytes = [value];
-            let (key, signature) = participant(scalar(value), &message_bytes);
+            let (key, signature) = participant(scalar_bytes(value), &message_bytes);
             verifier
                 .add(
                     &AggregatePublicKey::from(key),
@@ -830,12 +830,12 @@ mod tests {
     #[test]
     fn group_verification_rejects_canceling_groups_appended_to_an_honest_signature() {
         let shared_message = b"attacker-selected message";
-        let (first_key, _) = participant(scalar(1), shared_message);
+        let (first_key, _) = participant(scalar_bytes(1), shared_message);
         let (inverse_key, _) = participant(
-            hex("73eda753299d7d483339d80809a1d80553bda402fffe5bfeffffffff00000000"),
+            decode_hex_array("73eda753299d7d483339d80809a1d80553bda402fffe5bfeffffffff00000000"),
             shared_message,
         );
-        let (honest_key, honest_signature) = participant(scalar(2), b"honest message");
+        let (honest_key, honest_signature) = participant(scalar_bytes(2), b"honest message");
         let signature = AggregateSignature::from(honest_signature);
         let keys = [
             AggregatePublicKey::from(first_key),
@@ -879,12 +879,12 @@ mod tests {
     #[test]
     fn group_verification_permits_a_temporary_identity() {
         let message_bytes = b"shared message";
-        let (first_key, first_signature) = participant(scalar(1), message_bytes);
+        let (first_key, first_signature) = participant(scalar_bytes(1), message_bytes);
         let (inverse_key, inverse_signature) = participant(
-            hex("73eda753299d7d483339d80809a1d80553bda402fffe5bfeffffffff00000000"),
+            decode_hex_array("73eda753299d7d483339d80809a1d80553bda402fffe5bfeffffffff00000000"),
             message_bytes,
         );
-        let (last_key, last_signature) = participant(scalar(2), message_bytes);
+        let (last_key, last_signature) = participant(scalar_bytes(2), message_bytes);
         let signature = aggregate_signatures(&[first_signature, inverse_signature, last_signature]);
         let keys = [
             AggregatePublicKey::from(first_key),
@@ -914,9 +914,9 @@ mod tests {
     }
 
     #[test]
-    fn streaming_verifier_retains_capacity_and_resets_after_every_outcome() {
-        let (key, signature) = participant(scalar(1), b"message");
-        let (_, wrong_signature) = participant(scalar(2), b"other message");
+    fn streaming_verifier_reuses_capacity_after_verification() {
+        let (key, signature) = participant(scalar_bytes(1), b"message");
+        let (_, wrong_signature) = participant(scalar_bytes(2), b"other message");
         let key = AggregatePublicKey::from(key);
         let signature = AggregateSignature::from(signature);
         let wrong_signature = AggregateSignature::from(wrong_signature);
@@ -947,7 +947,7 @@ mod tests {
 
     #[test]
     fn verifier_capacity_grows_lazily_and_is_retained() {
-        let (key, signature) = participant(scalar(1), b"message");
+        let (key, signature) = participant(scalar_bytes(1), b"message");
         let key = AggregatePublicKey::from(key);
         let signature = AggregateSignature::from(signature);
         let messages = [
@@ -986,7 +986,7 @@ mod tests {
 
     #[test]
     fn an_excess_distinct_message_poisons_until_finish_and_reset() {
-        let (key, signature) = participant(scalar(1), b"first");
+        let (key, signature) = participant(scalar_bytes(1), b"first");
         let key = AggregatePublicKey::from(key);
         let signature = AggregateSignature::from(signature);
         let first = HashedMessage::new(b"first");
@@ -995,14 +995,14 @@ mod tests {
         let mut verifier = AggregateVerifier::new(1);
 
         verifier.add(&key, &first).unwrap();
-        let grouped_key = verifier.groups[&first].key;
+        let key_sum_before_overflow = verifier.groups[&first].key_sum;
         let capacity = verifier.groups.capacity();
 
         assert_eq!(verifier.add(&key, &second), Err(error));
         assert_eq!(verifier.add(&key, &first), Err(error));
         assert_eq!(verifier.groups.len(), 1);
         assert_eq!(verifier.groups.capacity(), capacity);
-        assert_eq!(verifier.groups[&first].key, grouped_key);
+        assert_eq!(verifier.groups[&first].key_sum, key_sum_before_overflow);
         assert!(!verifier.finish_and_reset(&signature));
         assert!(verifier.groups.is_empty());
         assert_eq!(verifier.groups.capacity(), capacity);
@@ -1014,7 +1014,7 @@ mod tests {
 
     #[test]
     fn bulk_addition_reports_distinct_message_overflow() {
-        let (key, signature) = participant(scalar(1), b"first");
+        let (key, signature) = participant(scalar_bytes(1), b"first");
         let key = AggregatePublicKey::from(key);
         let signature = AggregateSignature::from(signature);
         let first = HashedMessage::new(b"first");
@@ -1039,7 +1039,7 @@ mod tests {
 
     #[test]
     fn zero_limit_rejects_the_first_message() {
-        let (key, signature) = participant(scalar(1), b"message");
+        let (key, signature) = participant(scalar_bytes(1), b"message");
         let key = AggregatePublicKey::from(key);
         let signature = AggregateSignature::from(signature);
         let message = HashedMessage::new(b"message");
@@ -1059,7 +1059,7 @@ mod tests {
         let mut verifier = AggregateVerifier::new(MILLER_LOOP_BATCH_SIZE);
 
         for value in 1..=MILLER_LOOP_BATCH_SIZE as u8 {
-            let (key, signature) = participant(scalar(value), &[value]);
+            let (key, signature) = participant(scalar_bytes(value), &[value]);
             verifier
                 .add(
                     &AggregatePublicKey::from(key),
@@ -1069,7 +1069,7 @@ mod tests {
             signatures.push(signature);
         }
 
-        let (key, _) = participant(scalar(1), b"excess");
+        let (key, _) = participant(scalar_bytes(1), b"excess");
         let key = AggregatePublicKey::from(key);
         assert_eq!(
             verifier.add(&key, &HashedMessage::new(b"excess")),
@@ -1080,7 +1080,7 @@ mod tests {
 
     #[test]
     fn empty_bulk_additions_leave_the_verifier_empty() {
-        let (_, signature) = participant(scalar(1), b"message");
+        let (_, signature) = participant(scalar_bytes(1), b"message");
         let signature = AggregateSignature::from(signature);
         let mut verifier = AggregateVerifier::new(1);
 
@@ -1091,7 +1091,7 @@ mod tests {
 
     #[test]
     fn reset_discards_pending_groups() {
-        let (key, signature) = participant(scalar(1), b"message");
+        let (key, signature) = participant(scalar_bytes(1), b"message");
         let key = AggregatePublicKey::from(key);
         let signature = AggregateSignature::from(signature);
         let message = HashedMessage::new(b"message");

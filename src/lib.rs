@@ -36,15 +36,15 @@ pub use aggregate::{
     AggregatePublicKey, AggregatePublicKeyBuilder, AggregateSignature, AggregateSignatureBuilder,
 };
 pub use error::{
-    AggregateError, DecodeError, InvalidProofError, ProofVerificationError,
+    DecodeError, InvalidProofError, ProofVerificationError, PublicKeyAggregationError,
     TooManyDistinctMessagesError,
 };
 #[cfg(feature = "signing")]
 pub use keygen::{KeyGenerationParameters, KeyInfoTooLongError, MAX_KEY_INFO_LENGTH};
 pub use message::{HashedMessage, PreparedMessage};
 pub use proof::ProofOfPossession;
-pub use public_key::{PublicKey, UnverifiedPublicKey};
+pub use public_key::{PublicKey, UnprovenPublicKey};
 #[cfg(feature = "signing")]
-pub use secret::{KeyMaterialTooShortError, SecretKey, SecretKeyError};
+pub use secret::{KeyMaterialTooShortError, SecretKey, SecretKeyDecodeError};
 pub use signature::Signature;
 pub use verify::AggregateVerifier;

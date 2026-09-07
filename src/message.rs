@@ -36,7 +36,7 @@ impl HashedMessage {
 
 impl Hash for HashedMessage {
     fn hash<H: Hasher>(&self, state: &mut H) {
-        ffi::hash_g2(&self.point, state);
+        ffi::hash_g2_coordinates(&self.point, state);
     }
 }
 
@@ -83,7 +83,7 @@ mod tests {
 
     use super::{HashedMessage, PreparedMessage};
     use crate::ffi;
-    use crate::test_util::hex;
+    use crate::test_util::decode_hex_array;
     use serde::Deserialize;
 
     const SCALAR_ONE_VECTOR: &str = include_str!(
@@ -155,8 +155,8 @@ mod tests {
     #[test]
     fn hash_matches_the_scalar_one_signature_vector() {
         let vector: VerificationVector = serde_json::from_str(SCALAR_ONE_VECTOR).unwrap();
-        let message: [u8; 32] = hex(&vector.input.message);
-        let expected: [u8; 96] = hex(&vector.input.signature);
+        let message: [u8; 32] = decode_hex_array(&vector.input.message);
+        let expected: [u8; 96] = decode_hex_array(&vector.input.signature);
         let hashed = HashedMessage::new(&message);
 
         assert!(vector.output);

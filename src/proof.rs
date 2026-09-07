@@ -24,7 +24,7 @@ impl ProofOfPossession {
 
 impl Hash for ProofOfPossession {
     fn hash<H: Hasher>(&self, state: &mut H) {
-        ffi::hash_g2(&self.point, state);
+        ffi::hash_g2_coordinates(&self.point, state);
     }
 }
 

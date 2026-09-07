@@ -1,10 +1,10 @@
 use blst_simple_rs::{
-    AggregateSignature, DecodeError, ProofOfPossession, Signature, UnverifiedPublicKey,
+    AggregateSignature, DecodeError, ProofOfPossession, Signature, UnprovenPublicKey,
 };
 
 #[test]
 fn rejects_invalid_g2_encodings() {
-    let uncompressed = [0; 96];
+    let missing_compression_flag = [0; 96];
     let mut malformed_identity = [0; 96];
     malformed_identity[0] = 0xc0;
     malformed_identity[95] = 1;
@@ -18,7 +18,11 @@ fn rejects_invalid_g2_encodings() {
     noncanonical_compressed_infinity[0] = 0xe0;
 
     for (case, bytes, expected) in [
-        ("uncompressed", uncompressed, DecodeError::BadEncoding),
+        (
+            "missing compression flag",
+            missing_compression_flag,
+            DecodeError::BadEncoding,
+        ),
         (
             "malformed identity",
             malformed_identity,
@@ -74,7 +78,7 @@ fn rejects_invalid_g2_encodings() {
 
 #[test]
 fn rejects_invalid_g1_encodings() {
-    let uncompressed = [0; 48];
+    let missing_compression_flag = [0; 48];
     let mut identity = [0; 48];
     identity[0] = 0xc0;
     let mut malformed_identity = identity;
@@ -91,7 +95,11 @@ fn rejects_invalid_g1_encodings() {
     noncanonical_compressed_infinity[0] = 0xe0;
 
     for (case, bytes, expected) in [
-        ("uncompressed", uncompressed, DecodeError::BadEncoding),
+        (
+            "missing compression flag",
+            missing_compression_flag,
+            DecodeError::BadEncoding,
+        ),
         ("identity", identity, DecodeError::PointAtInfinity),
         (
             "malformed identity",
@@ -121,7 +129,7 @@ fn rejects_invalid_g1_encodings() {
         ),
     ] {
         assert_eq!(
-            UnverifiedPublicKey::from_bytes(&bytes).unwrap_err(),
+            UnprovenPublicKey::from_bytes(&bytes).unwrap_err(),
             expected,
             "public key: {case}"
         );
