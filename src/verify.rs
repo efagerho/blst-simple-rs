@@ -396,7 +396,19 @@ impl AggregateVerifier {
             return Err(error);
         }
 
-        let at_limit = self.groups.len() >= self.maximum_distinct_messages;
+        if self.groups.len() >= self.maximum_distinct_messages {
+            let Some(group) = self.groups.get_mut(message) else {
+                self.overflowed = true;
+                return Err(error);
+            };
+
+            ffi::add_g1_affine(&mut group.key_sum, &key.point);
+            if group.prepared_lines.is_none() {
+                group.prepared_lines = prepared_lines.cloned();
+            }
+            return Ok(());
+        }
+
         match self.groups.entry(*message) {
             Entry::Occupied(mut entry) => {
                 let group = entry.get_mut();
@@ -405,10 +417,6 @@ impl AggregateVerifier {
                     group.prepared_lines = prepared_lines.cloned();
                 }
                 Ok(())
-            }
-            Entry::Vacant(_) if at_limit => {
-                self.overflowed = true;
-                Err(error)
             }
             Entry::Vacant(entry) => {
                 entry.insert(MessageGroup {
@@ -1047,7 +1055,31 @@ mod tests {
         let mut verifier = AggregateVerifier::new(0);
 
         assert_eq!(verifier.add(&key, &message), Err(error));
+        assert_eq!(verifier.groups.capacity(), 0);
         assert!(!verifier.finish_and_reset(&signature));
+    }
+
+    #[test]
+    fn rejected_distinct_message_does_not_grow_a_full_table() {
+        let (key, _) = participant(scalar_bytes(1), b"message");
+        let key = AggregatePublicKey::from(key);
+        let mut verifier = AggregateVerifier::try_with_initial_capacity(usize::MAX, 1).unwrap();
+        let capacity = verifier.groups.capacity();
+        verifier.maximum_distinct_messages = capacity;
+
+        for index in 0..capacity {
+            verifier
+                .add(&key, &HashedMessage::new(&index.to_le_bytes()))
+                .unwrap();
+        }
+
+        assert_eq!(verifier.groups.len(), capacity);
+        assert_eq!(
+            verifier.add(&key, &HashedMessage::new(b"excess")),
+            Err(TooManyDistinctMessagesError { maximum: capacity })
+        );
+        assert_eq!(verifier.groups.len(), capacity);
+        assert_eq!(verifier.groups.capacity(), capacity);
     }
 
     #[test]
